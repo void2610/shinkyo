@@ -16,7 +16,8 @@
 - 自動送信のカテゴリや宛先を増やすときは、先にユーザーの確認を取る
 - SUUMO へのリクエストは src/fetch/suumo.ts の HttpClient だけを使う（間隔・上限・robots.txt・停止条件はそこで強制する）
 - 情報は SQLite だけに置く。Notion などの第三者サービスへ物件・業者・やりとりの情報を送らない
-- リポジトリは公開。data/、config/profile.local.yaml、config/agents.yaml、認証情報はコミットせず、中身をログや出力に出さない
+- リポジトリは公開。data/、config/*.local.yaml、config/agents.yaml、認証情報はコミットせず、中身をログや出力に出さない
+- 実際に探す条件 (間取り・家賃・地域・駅・通勤先など) は config/*.local.yaml にだけ置く。コミット・Knowledge・コミットメッセージ・仕様書に書かない
 - tests/fixtures/ には合成データだけを置く。SUUMO の HTML や業者の実メールをそのまま入れない
 - パーサーを直すときは、data/raw/ の最新HTMLの構造を写した合成HTMLを tests/fixtures/ に加え、先に失敗するテストを書く
 - 変更後は typecheck・lint・test を通してからコミットする

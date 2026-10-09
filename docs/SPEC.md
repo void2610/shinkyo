@@ -73,7 +73,7 @@ Oct 9, 2026 · @Shuya Izumi
 
 ## 3. リポジトリ構成と設定
 
-値はすべて config/ のYAMLに置き、コードに埋め込まない。個人情報は profile.local.yaml だけに置き、gitに入れない。リポジトリは公開なので、業者の連絡先を含む agents.yaml も gitignore し、agents.example.yaml だけをコミットする。
+値はすべて config/ のYAMLに置き、コードに埋め込まない。個人情報と実際の探す条件（criteria・searches・stations）は `*.local.yaml` に置き、gitに入れない。リポジトリの同名ファイルはサンプルで、`*.local.yaml` があればそちらを優先して読む。リポジトリは公開なので、業者の連絡先を含む agents.yaml も gitignore し、agents.example.yaml だけをコミットする。
 
 ```text
 shinkyo/
@@ -137,7 +137,7 @@ fetch:
   request_gap_sec: 10               # 1リクエストごとの最小間隔
   jitter_sec: 3
   max_pages_per_search: 3
-  daily_request_cap: 150
+  daily_request_cap: 300
   stop_on_status: [403, 429, 503]
 images:                             # 物件写真。候補のサムネイルと間取り図は定期実行で先に取得し、残りは画面で見たときに取得する
   request_gap_sec: 0.2              # ブラウザで SUUMO を見るときの同時読み込みより控えめ
