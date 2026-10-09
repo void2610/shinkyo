@@ -2,9 +2,9 @@
 
 ## 2026-10-10 画面は Notion をやめ、M1 上の自前の Web 画面にする
 
-- 決定：SQLite を唯一の正本にし、Hono + JSX + htmx の画面を `shinkyo serve` で常駐させて Tailscale 内だけに公開する
+- 決定：SQLite を唯一の正本にし、Hono + JSX + htmx の画面を `shinkyo serve` で常駐させて Tailscale 内だけに公開する (後に変更: Cloudflare Tunnel + Access。下の 2026-10-10 の項)
 - Why：Notion に置くと、住所・交渉の経緯・業者の連絡先といった情報資産が第三者の管理下に入る。また判定・承認・メモが Notion 起点になり、SQLite が正本でなくなる
-- 閲覧共有：ほかの人は閲覧だけで、操作は本人1人。Tailscale のノード共有で見せ、書き込みは本人の端末からだけ受け付ける。判定を人ごとに持つ必要はない
+- 閲覧共有：ほかの人は閲覧だけで、操作は本人1人とした (後に変更: 権限の区別なし・人ごとの判定とメモ)
 
 ## 2026-10-10 言語は Python ではなく TypeScript + Bun
 
@@ -31,8 +31,8 @@
 - 「200 なのに0件」は、一覧上部のヒット件数が0でないときだけパーサー破損とみなす。条件を絞った検索で本当に0件のときに誤報しないため
 - 「掲載終了の可能性」は、部屋の全掲載が2回続けて一覧に無いときだけ付ける。別の業者の掲載が残っていれば募集中とみなす。検索が max_pages_per_search に収まらず途中で打ち切ったときは判定しない
 - 通常の SUUMO のページには「captcha」という文字列が含まれないので、CAPTCHA の兆候の判定に使える
-- 画面の操作権限は `tailscale serve` が付ける `Tailscale-User-Login` ヘッダーで判定し、無ければ閲覧専用にする。サーバーは 127.0.0.1 にしか bind しない
-- tailscale serve は他サイトからのリクエストにも利用者ヘッダーを付けるので、CSRF は Origin で防ぐ。公開 URL の origin を profile.local.yaml の `web.allowed_origins` に書く
+- サーバーは 127.0.0.1 にしか bind しない (権限の判定は後に廃止)
+- CSRF は Origin で防ぐ。公開 URL の origin を profile.local.yaml の `web.allowed_origins` に書く
 
 ## 2026-10-10 物件写真は画面で見たときに取得して残す
 
@@ -97,12 +97,12 @@
 
 ## 2026-10-10 画面を React Router v8 + shadcn/ui に移す
 
-- 決定：画面を React Router の framework mode (SSR) と shadcn/ui (Base UI + Tailwind CSS v4) で作る。入口は Hono のまま残し、権限 (Tailscale-User-Login)・CSRF・写真の配信を Hono で行い、残りを `createRequestHandler` に渡す。バッチ・SQLite・クエリは変えない
+- 決定：画面を React Router の framework mode (SSR) と shadcn/ui (Base UI + Tailwind CSS v4) で作る。入口は Hono のまま残し、人の見分け・CSRF・写真の配信を Hono で行い、残りを `createRequestHandler` に渡す。バッチ・SQLite・クエリは変えない
 - Why：要件の重心が UI の質に移った。拡大表示・絞り込み・選択ボタンを自前で作り続けるより、品質の保証された shadcn/ui の部品を使う方が安い。比較表・地図・内見計画などブラウザ側の操作が増える見込みもある
 - 見送った案：Bootstrap (見た目が古い)、Tailwind + Basecoat (shadcn の見た目を写しただけで部品と振る舞いが足りない)、HonoX (shadcn/ui が使いにくい)、Next.js (常駐する個人用ツールには重く、Bun と bun:sqlite との組み合わせに癖がある)
 - React Router は最新の v8 を使う (v7 の framework mode の後継)。v8 では loader / action の context が必ず RouterContextProvider になり、`createContext()` のキーで値を渡す
 - 落とし穴1：Hono の入口はソースの app/context.ts を、画面のビルドは同梱のコピーを読むので、`createContext()` のキーが別物になる。キーを globalThis に1つだけ置いて共有する
-- 落とし穴2：tailscale serve 経由だと URL は 127.0.0.1 のまま届き、React Router が Origin ヘッダーとの不一致で action を止める。CSRF で許可した公開 URL から来たものだけ、URL を公開側に直してから渡す
+- 落とし穴2：トンネル経由だと URL は 127.0.0.1 のまま届き、React Router が Origin ヘッダーとの不一致で action を止める。CSRF で許可した公開 URL から来たものだけ、URL を公開側に直してから渡す
 - テストは HTTP 越しに行うため、`bun run test` で画面をビルドしてから bun test を走らせる
 
 ## 2026-10-10 1日のページ取得の上限を 300 にする
@@ -130,3 +130,12 @@
 
 - 決定：実際の探す条件 (criteria・searches・stations) と個人情報は gitignore した config/*.local.yaml に置く。リポジトリの同名ファイルはサンプルにし、*.local.yaml があれば優先して読む
 - Why：公開リポジトリのコミットと Knowledge に、探している間取りと地域を書いて push してしまった。履歴を書き換えて force push で取り除いた
+
+## 2026-10-10 Web画面は Cloudflare Tunnel + Access で公開し、権限の区別をなくす
+
+- 決定：画面を Cloudflare Tunnel で公開し、Cloudflare Access のメールアドレスの許可リストで入れる人を限る。人によって権限は変えず、判定・メモ・申込の承認は誰でもできる。判定とメモは人ごとに持ち、誰の操作かと変更前の値を events に残す
+- Why：複数人で見て判断する。問い合わせや申込などの重要な操作は Claude Code から行うので、画面に権限の差は要らない。誰が付けた判定かが分かれば、Claude のセッションが全員の判断を踏まえて相談に乗れる
+- 人の見分け方：入口で Cf-Access-Jwt-Assertion を検証 (署名・発行元・AUD) し、確認済みのメールアドレスを使う。メールアドレスのヘッダーだけでは信用しない
+- 見送った案：Tailscale (閲覧する人全員にアプリが要る)、公開 URL + 自前のログイン (実装と保守が重く、直接さらされる)、ルーターのポート開放 (自宅の IP が出る)
+- 問い合わせ (J3) は画面の ◎ では送らない。Claude Code で全員の判定とメモを見て決め、指示する
+- 誤りの記録：公開方法を確認しないまま Tailscale を前提に実装を始めてしまい、消して提案からやり直した
