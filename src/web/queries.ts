@@ -228,31 +228,26 @@ export type FilterOptions = {
 	features: string[];
 };
 
-// 選択肢は実際に集めた部屋から作る。見送りの部屋しか無い間取りや駅は出さない
+// 選択肢は実際に集めた部屋から作る。状態で「すべて」や「見送り」も選べるので、見送りの部屋も含める
 export function filterOptions(db: Database): FilterOptions {
-	const layouts = db
-		.query<{ layout: string }, []>(
-			`SELECT l.layout FROM listings l JOIN units u ON u.unit_key = l.unit_key WHERE u.status != '見送り'
-			GROUP BY l.layout ORDER BY COUNT(DISTINCT l.unit_key) DESC`,
-		)
-		.all()
-		.map((r) => r.layout);
-	const stations = db
-		.query<{ station: string }, []>(
-			`SELECT json_extract(s.value, '$.station') AS station FROM listings l JOIN units u ON u.unit_key = l.unit_key,
-				json_each(l.stations) s
-			WHERE u.status != '見送り' GROUP BY station ORDER BY COUNT(DISTINCT l.unit_key) DESC, station`,
-		)
-		.all()
-		.map((r) => r.station);
-	const features = db
-		.query<{ feature: string }, []>(
-			`SELECT f.value AS feature FROM listings l JOIN units u ON u.unit_key = l.unit_key, json_each(l.features) f
-			WHERE u.status != '見送り' GROUP BY feature ORDER BY COUNT(DISTINCT l.unit_key) DESC, feature`,
-		)
-		.all()
-		.map((r) => r.feature);
-	return { layouts, stations, features };
+	const list = (sql: string) =>
+		db
+			.query<{ value: string }, []>(sql)
+			.all()
+			.map((r) => r.value);
+	return {
+		layouts: list(
+			"SELECT layout AS value FROM listings GROUP BY layout ORDER BY COUNT(DISTINCT unit_key) DESC",
+		),
+		stations: list(
+			`SELECT json_extract(s.value, '$.station') AS value FROM listings l, json_each(l.stations) s
+			GROUP BY value ORDER BY COUNT(DISTINCT l.unit_key) DESC, value`,
+		),
+		features: list(
+			`SELECT f.value AS value FROM listings l, json_each(l.features) f
+			GROUP BY value ORDER BY COUNT(DISTINCT l.unit_key) DESC, value`,
+		),
+	};
 }
 
 export function countByStatus(db: Database): Map<string, number> {

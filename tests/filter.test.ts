@@ -80,6 +80,13 @@ describe("一覧の絞り込み", () => {
 		expect(names({ features: ["バストイレ別", "存在しない設備"] })).toEqual([]);
 	});
 
+	test("見送りの部屋の間取りも選択肢に残す (状態で「すべて」や「見送り」を選べるため)", () => {
+		db.query("UPDATE units SET status = '見送り' WHERE unit_key = ?").run(
+			keyOf("900000000004"),
+		);
+		expect(filterOptions(db).layouts).toContain("1K");
+	});
+
 	test("選択肢は実際の部屋から作る", () => {
 		expect(filterOptions(db).layouts.sort()).toEqual([
 			"1K",
