@@ -138,9 +138,9 @@ fetch:
   max_pages_per_search: 3
   daily_request_cap: 150
   stop_on_status: [403, 429, 503]
-images:                             # 画面で見たときに取得してキャッシュする物件写真
-  request_gap_sec: 1
-  jitter_sec: 0.5
+images:                             # 物件写真。候補のサムネイルと間取り図は定期実行で先に取得し、残りは画面で見たときに取得する
+  request_gap_sec: 0.2              # ブラウザで SUUMO を見るときの同時読み込みより控えめ
+  jitter_sec: 0.1
   daily_cap: 1000
 mail:
   send_hours: "09:00-21:00"
@@ -250,7 +250,7 @@ claude -p \
 2. robots.txt を1日1回取得し、searches.yaml の各URLが許可されているか確認する
 3. 一覧を最大 max\_pages\_per\_search ページ取得する。間隔は request\_gap\_sec＋0〜jitter\_sec 秒
 4. 掲載を解析して upsert する。新しい listing\_id だけ詳細ページを1回取得し、raw HTML を data/raw/ に7日間保存する
-   - 物件写真は URL だけを保存し、画面で表示されたときに取得して data/images/ に残す（ページとは別の間隔と上限。取得時間帯では止めない）
+   - 物件写真は URL を保存し、見送り以外の部屋のカードの1枚目と間取り図は取得ジョブの最後に先回りして取得する。残りは画面で表示されたときに取得する。どちらも data/images/ に残す（ページとは別の間隔と上限）
 5. 一覧に2回連続で無い掲載に「掲載終了の可能性」、家賃の低下に「値下げ」を付ける
 6. stop\_on\_status の応答か CAPTCHA の兆候で、その日の取得を止めて通知する
 7. 一覧が200なのに0件しか解析できなければ、パーサー破損として通知する
