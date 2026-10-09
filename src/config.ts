@@ -111,7 +111,10 @@ async function readOptionalYaml(path: string): Promise<unknown> {
 	return (await file.exists()) ? (parse(await file.text()) ?? {}) : {};
 }
 
-export async function loadConfig(dir = "config"): Promise<Config> {
+export async function loadConfig(
+	dir = "config",
+	options: { local?: boolean } = {},
+): Promise<Config> {
 	const load = async <T>(
 		name: string,
 		schema: z.ZodType<T>,
@@ -128,11 +131,21 @@ export async function loadConfig(dir = "config"): Promise<Config> {
 		}
 		return result.data;
 	};
+	// 個人の条件は gitignore した *.local.yaml に置く。あればリポジトリのサンプルより優先する
+	const personal = async (name: string): Promise<string> => {
+		const local = name.replace(/\.yaml$/, ".local.yaml");
+		return options.local !== false &&
+			(await Bun.file(join(dir, local)).exists())
+			? local
+			: name;
+	};
 	return {
 		policy: await load("policy.yaml", policySchema),
-		criteria: await load("criteria.yaml", criteriaSchema),
-		searches: (await load("searches.yaml", searchesSchema)).searches,
-		stations: (await load("stations.yaml", stationsSchema)).stations,
+		criteria: await load(await personal("criteria.yaml"), criteriaSchema),
+		searches: (await load(await personal("searches.yaml"), searchesSchema))
+			.searches,
+		stations: (await load(await personal("stations.yaml"), stationsSchema))
+			.stations,
 		profile: await load("profile.local.yaml", profileSchema, true),
 	};
 }

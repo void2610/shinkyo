@@ -8,8 +8,9 @@ export const fixture = (name: string): Promise<string> =>
 
 export const memoryDb = (): Database => openDb(":memory:");
 
+// 手元の *.local.yaml (実際の条件) に左右されないよう、テストは常にリポジトリのサンプルを読む
 export const repoConfig = (): Promise<Config> =>
-	loadConfig(join(import.meta.dir, "..", "config"));
+	loadConfig(join(import.meta.dir, "..", "config"), { local: false });
 
 // JST 2026-10-12(月) 10:00
 export const MONDAY_10_JST = new Date("2026-10-12T01:00:00Z");

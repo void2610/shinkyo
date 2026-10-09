@@ -6,7 +6,7 @@ result
 
 # 実データと個人情報 (公開リポジトリのため)
 data/
-config/profile.local.yaml
+config/*.local.yaml
 config/agents.yaml
 credentials*.json
 token*.json
