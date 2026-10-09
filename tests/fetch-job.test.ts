@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { noopRawStore } from "../src/fetch/raw.ts";
-import { HttpClient } from "../src/fetch/suumo.ts";
+import { HttpClient, pageLimits } from "../src/fetch/suumo.ts";
 import { runFetch } from "../src/jobs/fetch.ts";
 import type { Notification } from "../src/notify.ts";
 import {
@@ -50,7 +50,7 @@ function setup(
 			db,
 			client: new HttpClient({
 				db,
-				policy: { ...config.policy.fetch, paused: false },
+				limits: pageLimits(config.policy),
 				runId: "test",
 				clock: clock.read,
 				sleep: async (ms) => clock.advance(ms),

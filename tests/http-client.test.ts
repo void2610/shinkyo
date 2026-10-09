@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { FetchPolicy } from "../src/config.ts";
-import { FetchStopped, HttpClient } from "../src/fetch/suumo.ts";
+import {
+	FetchStopped,
+	HttpClient,
+	imageLimits,
+	pageLimits,
+	type RequestLimits,
+} from "../src/fetch/suumo.ts";
 import {
 	FakeClock,
 	fakeFetch,
@@ -15,7 +20,7 @@ const ROBOTS = "https://suumo.jp/robots.txt";
 const config = await repoConfig();
 
 function setup(
-	policy: Partial<FetchPolicy> = {},
+	limits: Partial<RequestLimits> = {},
 	routes: Record<string, Route | (() => Route)> = {},
 ) {
 	const db = memoryDb();
@@ -28,7 +33,7 @@ function setup(
 	});
 	const client = new HttpClient({
 		db,
-		policy: { ...config.policy.fetch, paused: false, ...policy },
+		limits: { ...pageLimits(config.policy), ...limits },
 		runId: "test",
 		clock: clock.read,
 		sleep: async (ms) => {
@@ -71,7 +76,7 @@ describe("HttpClient", () => {
 	});
 
 	test("1日の上限に達したら送らない", async () => {
-		const { client, calls } = setup({ daily_request_cap: 3 });
+		const { client, calls } = setup({ dailyCap: 3 });
 		await client.get(LIST);
 		await client.get(LIST);
 		expect(await stopReason(client.get(LIST))).toBe("daily_cap");
@@ -120,8 +125,78 @@ describe("HttpClient", () => {
 		expect(night.calls).toEqual([]);
 	});
 
-	test("SUUMO 以外の URL は取得しない", async () => {
+	test("系統の origin 以外の URL は取得しない", async () => {
 		const { client } = setup();
-		expect(client.get("https://example.com/")).rejects.toThrow("SUUMO 以外");
+		expect(client.get("https://example.com/")).rejects.toThrow(
+			"以外の URL は取得しない",
+		);
+	});
+
+	test("--ignore-active-hours では時間帯の外でも取得するが、間隔は守る", async () => {
+		const { client, clock, sleeps } = setup(
+			pageLimits(config.policy, { ignoreActiveHours: true }),
+		);
+		clock.set(new Date("2026-10-12T15:52:00Z")); // JST 0:52
+		await client.get(LIST);
+		await client.get(LIST);
+		expect(sleeps).toEqual([11500, 11500]);
+	});
+});
+
+describe("画像の取得", () => {
+	const IMAGE =
+		"https://img01.suumo.com/front/gazo/fr/bukken/001/900000000001/900000000001_go.jpg";
+	const IMAGE_ROBOTS = "https://img01.suumo.com/robots.txt";
+	const imageRoutes = {
+		[IMAGE_ROBOTS]: {
+			body: "User-Agent: *\nDisallow: /\nAllow: /front/gazo/\n",
+		},
+		[IMAGE]: { body: "jpeg-bytes" },
+	};
+
+	test("画像サーバーの robots.txt に従い、/front/gazo/ 以外は取得しない", async () => {
+		const { client, calls } = setup(imageLimits(config.policy), imageRoutes);
+		expect((await client.get(IMAGE)).bytes.length).toBeGreaterThan(0);
+		expect(
+			await stopReason(client.get("https://img01.suumo.com/jj/other.jpg")),
+		).toBe("robots");
+		expect(calls).toEqual([IMAGE_ROBOTS, IMAGE]);
+	});
+
+	test("画像は時間帯で止めず、上限はページと別に数える", async () => {
+		const { client, clock, db } = setup(
+			imageLimits(config.policy),
+			imageRoutes,
+		);
+		clock.set(new Date("2026-10-12T15:52:00Z"));
+		await client.get(IMAGE);
+		const kinds = db
+			.query<{ kind: string }, []>("SELECT DISTINCT kind FROM fetch_log")
+			.all();
+		expect(kinds).toEqual([{ kind: "image" }]);
+	});
+
+	test("画像で 429 を受けたらページの取得もその日は止める", async () => {
+		const image = setup(imageLimits(config.policy), {
+			...imageRoutes,
+			[IMAGE]: { status: 429, body: "" },
+		});
+		expect(await stopReason(image.client.get(IMAGE))).toBe("blocked");
+		const page = new HttpClient({
+			db: image.db,
+			limits: pageLimits(config.policy),
+			runId: "test",
+			clock: image.clock.read,
+			sleep: async () => {},
+			random: () => 0,
+			fetchImpl: async () => new Response(""),
+		});
+		expect(await stopReason(page.get(LIST))).toBe("stopped_today");
+	});
+
+	test("同時に呼ばれても1本ずつ間隔をあけて送る", async () => {
+		const { client, sleeps } = setup();
+		await Promise.all([client.get(LIST), client.get(LIST), client.get(LIST)]);
+		expect(sleeps).toEqual([11500, 11500, 11500]);
 	});
 });

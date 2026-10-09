@@ -72,6 +72,16 @@ describe("検索一覧", () => {
 			layout: "1LDK",
 			areaM2: 40.02,
 			isNewArrival: false,
+			images: [
+				{
+					url: "https://img01.suumo.com/front/gazo/fr/bukken/001/900000000001/900000000001_go.jpg",
+					caption: null,
+				},
+				{
+					url: "https://img01.suumo.com/front/gazo/fr/bukken/001/900000000001/900000000001_co.jpg",
+					caption: null,
+				},
+			],
 		});
 		expect(page.rooms[2]).toMatchObject({
 			floor: -1,
@@ -117,6 +127,21 @@ describe("物件詳細", () => {
 			],
 			otherCosts: null,
 			guarantor: "保証会社利用必 初回：月額総家賃の50％",
+			notes: null,
+			images: [
+				{
+					url: "https://img01.suumo.com/front/gazo/fr/bukken/002/900000000002/900000000002_go.jpg",
+					caption: "建物外観 テストハイツ桜B",
+				},
+				{
+					url: "https://img01.suumo.com/front/gazo/fr/bukken/002/900000000002/900000000002_co.jpg",
+					caption: "間取り図",
+				},
+				{
+					url: "https://img01.suumo.com/front/gazo/fr/bukken/002/900000000002/900000000002_1o.jpg",
+					caption: "居室・リビング",
+				},
+			],
 		});
 	});
 });

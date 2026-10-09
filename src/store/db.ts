@@ -107,6 +107,21 @@ const migrations: string[] = [
 		value TEXT NOT NULL
 	);
 	`,
+	`
+	ALTER TABLE listings ADD COLUMN images TEXT NOT NULL DEFAULT '[]';
+	ALTER TABLE fetch_log ADD COLUMN kind TEXT NOT NULL DEFAULT 'page';
+	CREATE INDEX fetch_log_kind_date ON fetch_log(kind, jst_date);
+
+	CREATE TABLE images (
+		url TEXT PRIMARY KEY,
+		path TEXT NOT NULL,
+		content_type TEXT NOT NULL,
+		fetched_at TEXT NOT NULL
+	);
+	`,
+	`
+	ALTER TABLE listings ADD COLUMN notes TEXT;
+	`,
 ];
 
 export function migrate(db: Database): void {

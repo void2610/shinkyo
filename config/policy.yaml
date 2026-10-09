@@ -7,6 +7,10 @@ fetch:
   max_pages_per_search: 3
   daily_request_cap: 150
   stop_on_status: [403, 429, 503]
+images:                             # 画面で見たときに取得してキャッシュする物件写真
+  request_gap_sec: 1
+  jitter_sec: 0.5
+  daily_cap: 1000
 mail:
   send_hours: "09:00-21:00"
   send_slots: ["10:00", "15:00"]    # J3 のまとめ送信の時刻

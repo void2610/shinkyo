@@ -148,8 +148,8 @@ export function upsertListing(
 	if (!existing) {
 		db.query(
 			`INSERT INTO listings (listing_id, url, search_id, first_seen, last_seen, is_new_arrival, rent, admin_fee, deposit,
-				key_money, layout, area_m2, built_age, floor, building_floors, building_name, property_type, address, stations, unit_key)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				key_money, layout, area_m2, built_age, floor, building_floors, building_name, property_type, address, stations, images, unit_key)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		).run(
 			room.listingId,
 			room.url,
@@ -170,6 +170,7 @@ export function upsertListing(
 			room.propertyType,
 			room.address,
 			JSON.stringify(room.stations),
+			JSON.stringify(room.images),
 			key,
 		);
 		const newUnit = ensureUnit(db, key, room, at);
@@ -186,7 +187,9 @@ export function upsertListing(
 	const before = existing.rent + existing.admin_fee;
 	const after = room.rent + room.adminFee;
 	db.query(
-		`UPDATE listings SET last_seen = ?, missing_runs = 0, is_new_arrival = ?, rent = ?, admin_fee = ?, deposit = ?, key_money = ?
+		// 説明付きの画像は詳細ページからしか取れないので、詳細を取得した後は一覧の画像で上書きしない
+		`UPDATE listings SET last_seen = ?, missing_runs = 0, is_new_arrival = ?, rent = ?, admin_fee = ?, deposit = ?, key_money = ?,
+			images = CASE WHEN detail_fetched_at IS NULL THEN ? ELSE images END
 		WHERE listing_id = ?`,
 	).run(
 		at,
@@ -195,6 +198,7 @@ export function upsertListing(
 		room.adminFee,
 		room.deposit,
 		room.keyMoney,
+		JSON.stringify(room.images),
 		room.listingId,
 	);
 	refreshEndedFlag(db, existing.unit_key, at);
@@ -277,8 +281,8 @@ export function applyDetail(
 	at: string,
 ): void {
 	db.query(
-		`UPDATE listings SET agent_name = ?, built_ym = ?, orientation = ?, features = ?, other_costs = ?, guarantor = ?,
-			raw_path = ?, detail_fetched_at = ? WHERE listing_id = ?`,
+		`UPDATE listings SET agent_name = ?, built_ym = ?, orientation = ?, features = ?, other_costs = ?, guarantor = ?, notes = ?,
+			images = CASE WHEN ? = '[]' THEN images ELSE ? END, raw_path = ?, detail_fetched_at = ? WHERE listing_id = ?`,
 	).run(
 		detail.agentName,
 		detail.builtYm,
@@ -286,6 +290,9 @@ export function applyDetail(
 		JSON.stringify(detail.features),
 		detail.otherCosts,
 		detail.guarantor,
+		detail.notes,
+		JSON.stringify(detail.images),
+		JSON.stringify(detail.images),
 		rawPath || null,
 		at,
 		listingId,

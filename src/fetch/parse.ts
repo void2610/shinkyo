@@ -20,6 +20,7 @@ export type ListedRoom = {
 	layout: string;
 	areaM2: number;
 	isNewArrival: boolean;
+	images: RoomImage[];
 };
 
 export type ListPage = {
@@ -27,6 +28,8 @@ export type ListPage = {
 	nextUrl: string | null;
 	hitCount: number | null;
 };
+
+export type RoomImage = { url: string; caption: string | null };
 
 export type RoomDetail = {
 	listingId: string | null;
@@ -36,6 +39,8 @@ export type RoomDetail = {
 	features: string[];
 	otherCosts: string | null;
 	guarantor: string | null;
+	notes: string | null;
+	images: RoomImage[];
 };
 
 const clean = (text: string): string => text.replace(/\s+/g, " ").trim();
@@ -84,6 +89,12 @@ export function parseStation(text: string): Station | null {
 	};
 }
 
+export const SUUMO_IMAGE_ORIGIN = "https://img01.suumo.com";
+
+// 画像サーバーの robots.txt が許可しているのは /front/gazo/ 配下だけ
+export const isImageUrl = (url: string): boolean =>
+	url.startsWith(`${SUUMO_IMAGE_ORIGIN}/front/gazo/`);
+
 const absolute = (href: string): string =>
 	new URL(href, SUUMO_ORIGIN).toString();
 
@@ -124,6 +135,11 @@ function parseRoomRow(
 			) || 0,
 		isNewArrival:
 			row.querySelector(".cassetteitem_other-checkbox--newarrival") !== null,
+		images: (row.querySelector("[data-imgs]")?.getAttribute("data-imgs") ?? "")
+			.split(",")
+			.map((url) => url.trim())
+			.filter(isImageUrl)
+			.map((url) => ({ url, caption: null })),
 	};
 }
 
@@ -137,7 +153,8 @@ type RoomOwnKeys =
 	| "keyMoney"
 	| "layout"
 	| "areaM2"
-	| "isNewArrival";
+	| "isNewArrival"
+	| "images";
 
 export function parseListPage(html: string): ListPage {
 	const root = parse(html);
@@ -205,6 +222,20 @@ function tableEntries(
 const orNull = (text: string | undefined): string | null =>
 	text && text !== "-" ? text : null;
 
+// 定期借家は契約期間の行に出ることも条件や備考に出ることもあるので、まとめて残す
+function noteOf(outline: Map<string, string>): string | null {
+	const picked = ["契約期間", "条件", "備考"].map((k) =>
+		orNull(outline.get(k)),
+	);
+	const fixedTerm = [...outline.values()].find((v) => v.includes("定期借家"));
+	const notes = [
+		...new Set(
+			[...picked, fixedTerm ?? null].filter((n): n is string => n !== null),
+		),
+	];
+	return notes.length > 0 ? notes.join(" / ") : null;
+}
+
 export function parseDetailPage(html: string): RoomDetail {
 	const root = parse(html);
 	const outline = tableEntries(root, "table.table_gaiyou");
@@ -229,6 +260,14 @@ export function parseDetailPage(html: string): RoomDetail {
 			: [],
 		otherCosts: orNull(outline.get("ほか初期費用")),
 		guarantor: orNull(outline.get("保証会社")),
+		notes: noteOf(outline),
+		images: root
+			.querySelectorAll("#js-view_gallery-list img")
+			.map((img) => ({
+				url: img.getAttribute("data-src") ?? img.getAttribute("src") ?? "",
+				caption: clean(img.getAttribute("alt") ?? "") || null,
+			}))
+			.filter((image) => isImageUrl(image.url)),
 	};
 }
 

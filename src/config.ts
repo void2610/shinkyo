@@ -21,6 +21,11 @@ export const policySchema = z.object({
 		daily_request_cap: z.number().int().positive(),
 		stop_on_status: z.array(z.number().int()),
 	}),
+	images: z.object({
+		request_gap_sec: z.number().min(0),
+		jitter_sec: z.number().min(0),
+		daily_cap: z.number().int().positive(),
+	}),
 	mail: z.object({
 		send_hours: hourRange,
 		send_slots: z.array(hhmm),
@@ -34,7 +39,6 @@ export const policySchema = z.object({
 	stop_fetch_when_status: z.array(z.enum(unitStatuses)),
 });
 export type Policy = z.infer<typeof policySchema>;
-export type FetchPolicy = Policy["fetch"] & { paused: boolean };
 
 export const criteriaSchema = z.object({
 	hard: z.object({
