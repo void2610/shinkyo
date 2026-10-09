@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Judgment, Station, UnitStatus } from "../domain.ts";
+import type { Judgment, Station, UnitFlag, UnitStatus } from "../domain.ts";
 import type { RoomImage } from "../fetch/parse.ts";
 import { recordEvent } from "../store/listings.ts";
 
@@ -15,6 +15,29 @@ export type UnitFilter = {
 	status: UnitStatus | "active" | "all";
 	judgment: Judgment | "none" | "all";
 	sort: SortKey;
+	// 家賃は管理費込みの円
+	maxRent: number | null;
+	minArea: number | null;
+	maxWalk: number | null;
+	maxAge: number | null;
+	layouts: string[];
+	station: string | null;
+	withFlags: UnitFlag[];
+	withoutFlags: UnitFlag[];
+};
+
+export const emptyFilter: UnitFilter = {
+	status: "active",
+	judgment: "all",
+	sort: "new",
+	maxRent: null,
+	minArea: null,
+	maxWalk: null,
+	maxAge: null,
+	layouts: [],
+	station: null,
+	withFlags: [],
+	withoutFlags: [],
 };
 
 export type UnitRow = {
@@ -128,28 +151,88 @@ const toUnit = (raw: RawUnitRow & { min_walk?: number | null }): UnitRow => {
 	};
 };
 
+const minWalkSql =
+	"(SELECT MIN(json_extract(value, '$.walkMin')) FROM json_each(r.stations))";
+
+// 築年月があればそこから、無ければ一覧の築年数を使う
+const ageSql =
+	"COALESCE($year - CAST(substr(r.built_ym, 1, 4) AS INTEGER), r.built_age)";
+
 export function listUnits(
 	db: Database,
 	filter: UnitFilter,
+	year: number,
 	limit = 300,
 ): UnitRow[] {
 	const where: string[] = [];
-	const params: Record<string, string> = {};
+	const params: Record<string, string | number> = {};
+	const bind = (name: string, value: string | number): string => {
+		params[name] = value;
+		return `$${name}`;
+	};
 	if (filter.status === "active") where.push("u.status != '見送り'");
-	else if (filter.status !== "all") {
-		where.push("u.status = $status");
-		params.status = filter.status;
-	}
+	else if (filter.status !== "all")
+		where.push(`u.status = ${bind("status", filter.status)}`);
 	if (filter.judgment === "none") where.push("u.judgment IS NULL");
-	else if (filter.judgment !== "all") {
-		where.push("u.judgment = $judgment");
-		params.judgment = filter.judgment;
+	else if (filter.judgment !== "all")
+		where.push(`u.judgment = ${bind("judgment", filter.judgment)}`);
+	if (filter.maxRent !== null)
+		where.push(`r.rent + r.admin_fee <= ${bind("maxRent", filter.maxRent)}`);
+	if (filter.minArea !== null)
+		where.push(`r.area_m2 >= ${bind("minArea", filter.minArea)}`);
+	if (filter.maxWalk !== null)
+		where.push(`${minWalkSql} <= ${bind("maxWalk", filter.maxWalk)}`);
+	if (filter.maxAge !== null) {
+		bind("year", year);
+		where.push(`${ageSql} <= ${bind("maxAge", filter.maxAge)}`);
 	}
+	if (filter.layouts.length > 0) {
+		where.push(
+			`r.layout IN (${filter.layouts.map((l, i) => bind(`layout${i}`, l)).join(", ")})`,
+		);
+	}
+	if (filter.station !== null) {
+		where.push(
+			`EXISTS (SELECT 1 FROM json_each(r.stations) WHERE json_extract(value, '$.station') = ${bind("station", filter.station)})`,
+		);
+	}
+	filter.withFlags.forEach((flag, i) => {
+		where.push(
+			`EXISTS (SELECT 1 FROM json_each(u.flags) WHERE value = ${bind(`with${i}`, flag)})`,
+		);
+	});
+	filter.withoutFlags.forEach((flag, i) => {
+		where.push(
+			`NOT EXISTS (SELECT 1 FROM json_each(u.flags) WHERE value = ${bind(`without${i}`, flag)})`,
+		);
+	});
 	const sql = `${unitSelect} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${orderBy[filter.sort]} LIMIT ${limit}`;
 	return db
-		.query<RawUnitRow, [Record<string, string>]>(sql)
+		.query<RawUnitRow, [Record<string, string | number>]>(sql)
 		.all(params)
 		.map(toUnit);
+}
+
+export type FilterOptions = { layouts: string[]; stations: string[] };
+
+// 選択肢は実際に集めた部屋から作る。見送りの部屋しか無い間取りや駅は出さない
+export function filterOptions(db: Database): FilterOptions {
+	const layouts = db
+		.query<{ layout: string }, []>(
+			`SELECT l.layout FROM listings l JOIN units u ON u.unit_key = l.unit_key WHERE u.status != '見送り'
+			GROUP BY l.layout ORDER BY COUNT(DISTINCT l.unit_key) DESC`,
+		)
+		.all()
+		.map((r) => r.layout);
+	const stations = db
+		.query<{ station: string }, []>(
+			`SELECT json_extract(s.value, '$.station') AS station FROM listings l JOIN units u ON u.unit_key = l.unit_key,
+				json_each(l.stations) s
+			WHERE u.status != '見送り' GROUP BY station ORDER BY COUNT(DISTINCT l.unit_key) DESC, station`,
+		)
+		.all()
+		.map((r) => r.station);
+	return { layouts, stations };
 }
 
 export function countByStatus(db: Database): Map<string, number> {

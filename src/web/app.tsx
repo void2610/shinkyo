@@ -3,12 +3,18 @@ import { Hono } from "hono";
 import { csrf } from "hono/csrf";
 import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
-import { judgments, unitStatuses } from "../domain.ts";
+import {
+	judgments,
+	type UnitFlag,
+	unitFlags,
+	unitStatuses,
+} from "../domain.ts";
 import type { ImageStore } from "../fetch/images.ts";
 import type { Clock } from "../time.ts";
 import {
 	approveApplication,
 	countByStatus,
+	filterOptions,
 	getEvents,
 	getImageUrl,
 	getListings,
@@ -17,6 +23,7 @@ import {
 	setJudgment,
 	setMemo,
 	sortKeys,
+	type UnitFilter,
 } from "./queries.ts";
 import {
 	ApproveControl,
@@ -38,11 +45,41 @@ export type WebOptions = {
 	devOwner: boolean;
 };
 
-const filterSchema = z.object({
-	status: z.enum(["active", "all", ...unitStatuses]).catch("active"),
-	judgment: z.enum(["all", "none", ...judgments]).catch("all"),
-	sort: z.enum(Object.keys(sortKeys) as [keyof typeof sortKeys]).catch("new"),
-});
+const positive = z.coerce.number().positive().nullable().catch(null);
+const flagSet = new Set<string>(unitFlags);
+
+// 空欄や不正な値は「指定なし」として扱い、エラーにしない
+export function parseFilter(query: URLSearchParams): UnitFilter {
+	const one = (name: string) => query.get(name) || null;
+	const tags = query.getAll("tag").filter((t) => flagSet.has(t.slice(1)));
+	const maxRentMan = positive.parse(one("max_rent"));
+	return {
+		status: z
+			.enum(["active", "all", ...unitStatuses])
+			.catch("active")
+			.parse(one("status")),
+		judgment: z
+			.enum(["all", "none", ...judgments])
+			.catch("all")
+			.parse(one("judgment")),
+		sort: z
+			.enum(Object.keys(sortKeys) as [keyof typeof sortKeys])
+			.catch("new")
+			.parse(one("sort")),
+		maxRent: maxRentMan === null ? null : Math.round(maxRentMan * 10000),
+		minArea: positive.parse(one("min_area")),
+		maxWalk: positive.parse(one("max_walk")),
+		maxAge: positive.parse(one("max_age")),
+		layouts: query.getAll("layout").filter(Boolean),
+		station: one("station"),
+		withFlags: tags
+			.filter((t) => t.startsWith("+"))
+			.map((t) => t.slice(1) as UnitFlag),
+		withoutFlags: tags
+			.filter((t) => t.startsWith("-"))
+			.map((t) => t.slice(1) as UnitFlag),
+	};
+}
 
 const judgmentForm = z.object({
 	judgment: z.union([z.enum(judgments), z.literal("").transform(() => null)]),
@@ -124,10 +161,11 @@ export function createApp(options: WebOptions) {
 	});
 
 	app.get("/", (c) => {
-		const filter = filterSchema.parse(c.req.query());
+		const filter = parseFilter(new URL(c.req.url).searchParams);
 		return c.html(
 			<UnitListPage
-				units={listUnits(db, filter)}
+				units={listUnits(db, filter, clock().getFullYear())}
+				options={filterOptions(db)}
 				filter={filter}
 				counts={countByStatus(db)}
 				access={c.get("role")}
