@@ -26,6 +26,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Textarea } from "~/components/ui/textarea";
 import { judgments } from "../../src/domain.ts";
 import {
+	displayName,
 	formatAge,
 	formatAt,
 	formatFloor,
@@ -36,6 +37,7 @@ import {
 } from "../../src/web/format.ts";
 import {
 	approveApplication,
+	type Evaluation,
 	type EventRow,
 	getEvents,
 	getListings,
@@ -52,7 +54,7 @@ import {
 	photosOf,
 } from "../components/photos";
 import { Flags, ScoreBadge, StatusBadge } from "../components/unit-badges";
-import { appContext, type Role } from "../context";
+import { appContext } from "../context";
 import type { Route } from "./+types/unit";
 
 export const meta: Route.MetaFunction = ({ loaderData }) => [
@@ -62,14 +64,15 @@ export const meta: Route.MetaFunction = ({ loaderData }) => [
 ];
 
 export function loader({ params, context }: Route.LoaderArgs) {
-	const { db, role } = context.get(appContext);
+	const { db, person, people } = context.get(appContext);
 	const unit = getUnit(db, params.key);
 	if (!unit) throw data("部屋が見つかりません", { status: 404 });
 	return {
 		unit,
 		listings: getListings(db, params.key),
 		events: getEvents(db, params.key),
-		role,
+		person,
+		people,
 	};
 }
 
@@ -82,10 +85,9 @@ const actionSchema = z.discriminatedUnion("intent", [
 	z.object({ intent: z.literal("approve") }),
 ]);
 
-// 判定・メモ・申込の承認は人だけが書く列。閲覧者の書き込みは Hono の入口でも止めている
+// 人によって権限は変えない。誰の操作かを記録するために person を渡す
 export async function action({ params, request, context }: Route.ActionArgs) {
-	const { db, clock, role } = context.get(appContext);
-	if (role !== "owner") throw data("閲覧専用です", { status: 403 });
+	const { db, clock, person } = context.get(appContext);
 	const form = actionSchema.safeParse(
 		Object.fromEntries(await request.formData()),
 	);
@@ -93,16 +95,16 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 	const at = clock().toISOString();
 	const input = form.data;
 	if (input.intent === "judgment") {
-		if (!setJudgment(db, params.key, input.judgment, at))
+		if (!setJudgment(db, params.key, person, input.judgment, at))
 			throw data("部屋が見つかりません", { status: 404 });
 		return { ok: true as const, at };
 	}
 	if (input.intent === "memo") {
-		if (!setMemo(db, params.key, input.memo, at))
+		if (!setMemo(db, params.key, person, input.memo, at))
 			throw data("部屋が見つかりません", { status: 404 });
 		return { ok: true as const, at };
 	}
-	const result = approveApplication(db, params.key, at);
+	const result = approveApplication(db, params.key, person, at);
 	if (result === "not_found")
 		throw data("部屋が見つかりません", { status: 404 });
 	if (result === "invalid_status")
@@ -110,7 +112,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 	return { ok: true as const, at };
 }
 
-const eventLabel = (e: EventRow): string => {
+const eventLabel = (
+	e: EventRow,
+	who: (d: Record<string, unknown>) => string,
+): string => {
 	const d = (e.detail ?? {}) as Record<string, unknown>;
 	switch (e.type) {
 		case "created":
@@ -118,11 +123,11 @@ const eventLabel = (e: EventRow): string => {
 		case "listing_added":
 			return "別の掲載を追加";
 		case "judgment":
-			return `判定 ${d.from ?? "未判定"} → ${d.to ?? "未判定"}`;
+			return `${who(d)}判定 ${d.from ?? "未判定"} → ${d.to ?? "未判定"}`;
 		case "memo":
-			return "メモを更新";
+			return `${who(d)}メモを更新`;
 		case "apply_approved":
-			return "申込を承認";
+			return `${who(d)}申込を承認`;
 		case "flag_on":
 			return `「${d.flag}」を付与`;
 		case "flag_off":
@@ -156,10 +161,10 @@ function Row({
 	);
 }
 
-function ApproveControl({ unit, role }: { unit: UnitRow; role: Role }) {
+function ApproveControl({ unit }: { unit: UnitRow }) {
 	const fetcher = useFetcher();
 	if (unit.apply_approved) return <Badge>申込を承認済み</Badge>;
-	if (role === "viewer" || unit.status !== "内見済") return null;
+	if (unit.status !== "内見済") return null;
 	return (
 		<AlertDialog>
 			<AlertDialogTrigger render={<Button variant="destructive" size="sm" />}>
@@ -169,8 +174,8 @@ function ApproveControl({ unit, role }: { unit: UnitRow; role: Role }) {
 				<AlertDialogHeader>
 					<AlertDialogTitle>この部屋の申込を承認しますか？</AlertDialogTitle>
 					<AlertDialogDescription>
-						承認すると、申込の意思表示 (T3)
-						の下書きが作られます。取り消せない操作の入口です。
+						承認したことを記録します。申込の連絡や申込フォームの入力は、Claude
+						Code から行います。
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
@@ -188,18 +193,16 @@ function ApproveControl({ unit, role }: { unit: UnitRow; role: Role }) {
 	);
 }
 
-function Memo({ unit, role }: { unit: UnitRow; role: Role }) {
+function MyMemo({ memo }: { memo: string | null }) {
 	const fetcher = useFetcher<typeof action>();
-	if (role === "viewer")
-		return <p className="text-sm whitespace-pre-wrap">{unit.memo ?? "なし"}</p>;
 	return (
 		<fetcher.Form method="post" className="grid gap-2">
 			<input type="hidden" name="intent" value="memo" />
 			<Textarea
 				name="memo"
 				rows={2}
-				defaultValue={unit.memo ?? ""}
-				aria-label="評価メモ"
+				defaultValue={memo ?? ""}
+				aria-label="自分の評価メモ"
 				placeholder="内見や比較で気づいたこと"
 				className="min-h-0 resize-y"
 			/>
@@ -219,8 +222,44 @@ function Memo({ unit, role }: { unit: UnitRow; role: Role }) {
 	);
 }
 
+// 自分以外の人の判定とメモを、誰のものか分かるように並べる
+function OthersNotes({
+	evaluations,
+	person,
+	people,
+}: {
+	evaluations: Evaluation[];
+	person: string;
+	people: Record<string, string>;
+}) {
+	const others = evaluations.filter(
+		(e) => e.person !== person && (e.judgment || e.memo),
+	);
+	if (others.length === 0) return null;
+	return (
+		<ul className="grid gap-2">
+			{others.map((e) => (
+				<li
+					key={e.person}
+					className="rounded-md border bg-muted/30 px-3 py-2 text-sm"
+				>
+					<div className="flex items-center gap-2 text-xs text-muted-foreground">
+						<span className="font-medium text-foreground">
+							{displayName(people, e.person)}
+						</span>
+						{e.judgment && <Badge variant="secondary">{e.judgment}</Badge>}
+						<span className="ml-auto">{formatAt(e.updated_at)}</span>
+					</div>
+					{e.memo && <p className="mt-1 whitespace-pre-wrap">{e.memo}</p>}
+				</li>
+			))}
+		</ul>
+	);
+}
+
 export default function UnitPage({ loaderData }: Route.ComponentProps) {
-	const { unit, listings, events, role } = loaderData;
+	const { unit, listings, events, person, people } = loaderData;
+	const mine = unit.evaluations.find((e) => e.person === person);
 	const detail = listings.find((l) => l.features.length > 0) ?? listings[0];
 	const photos = photosOf(listings);
 	const [openAt, setOpenAt] = useState<number | null>(null);
@@ -279,14 +318,20 @@ export default function UnitPage({ loaderData }: Route.ComponentProps) {
 					<div className="flex flex-wrap items-center gap-3">
 						<JudgmentControl
 							unitKey={unit.unit_key}
-							judgment={unit.judgment}
-							role={role}
+							judgment={mine?.judgment ?? null}
 						/>
-						<ApproveControl unit={unit} role={role} />
+						<ApproveControl unit={unit} />
 					</div>
 					<div className="grid gap-1.5">
-						<span className="text-xs text-muted-foreground">評価メモ</span>
-						<Memo unit={unit} role={role} />
+						<span className="text-xs text-muted-foreground">
+							自分の評価メモ
+						</span>
+						<MyMemo memo={mine?.memo ?? null} />
+						<OthersNotes
+							evaluations={unit.evaluations}
+							person={person}
+							people={people}
+						/>
 					</div>
 				</div>
 				{/* PC で見出しの右が空くので、比較で一番見る間取り図を置く */}
@@ -396,7 +441,11 @@ export default function UnitPage({ loaderData }: Route.ComponentProps) {
 										{formatAt(e.at)}
 									</time>
 									<span>
-										{eventLabel(e)}
+										{eventLabel(e, (d) =>
+											typeof d.person === "string"
+												? `${displayName(people, d.person)}: `
+												: "",
+										)}
 										{e.actor === "human" && (
 											<span className="text-muted-foreground">（人）</span>
 										)}

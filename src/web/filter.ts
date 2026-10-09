@@ -1,11 +1,6 @@
 import { z } from "zod";
-import {
-	judgments,
-	type UnitFlag,
-	unitFlags,
-	unitStatuses,
-} from "../domain.ts";
-import { sortKeys, type UnitFilter } from "./queries.ts";
+import { type UnitFlag, unitFlags, unitStatuses } from "../domain.ts";
+import { judgmentFilters, sortKeys, type UnitFilter } from "./queries.ts";
 
 const positive = z.coerce.number().positive().nullable().catch(null);
 const flagSet = new Set<string>(unitFlags);
@@ -20,10 +15,7 @@ export function parseFilter(query: URLSearchParams): UnitFilter {
 			.enum(["active", "all", ...unitStatuses])
 			.catch("active")
 			.parse(one("status")),
-		judgment: z
-			.enum(["all", "none", ...judgments])
-			.catch("all")
-			.parse(one("judgment")),
+		judgment: z.enum(judgmentFilters).catch("all").parse(one("judgment")),
 		sort: z
 			.enum(Object.keys(sortKeys) as [keyof typeof sortKeys])
 			.catch("new")

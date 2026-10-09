@@ -18,19 +18,20 @@ import type { Route } from "./+types/home";
 export const meta: Route.MetaFunction = () => [{ title: "部屋一覧 | shinkyo" }];
 
 export function loader({ request, context }: Route.LoaderArgs) {
-	const { db, clock, role } = context.get(appContext);
+	const { db, clock, person, people } = context.get(appContext);
 	const filter = parseFilter(new URL(request.url).searchParams);
 	return {
-		units: listUnits(db, filter, clock().getFullYear()),
+		units: listUnits(db, filter, clock().getFullYear(), person),
 		filter,
 		options: filterOptions(db),
 		counts: Object.fromEntries(countByStatus(db)),
-		role,
+		person,
+		people,
 	};
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-	const { units, filter, options, counts, role } = loaderData;
+	const { units, filter, options, counts, person, people } = loaderData;
 	return (
 		<>
 			<FilterBar filter={filter} options={options} counts={counts} />
@@ -47,7 +48,12 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 			) : (
 				<div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
 					{units.map((u) => (
-						<UnitCard key={u.unit_key} unit={u} role={role} />
+						<UnitCard
+							key={u.unit_key}
+							unit={u}
+							person={person}
+							people={people}
+						/>
 					))}
 				</div>
 			)}

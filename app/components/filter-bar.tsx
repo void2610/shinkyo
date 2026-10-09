@@ -193,8 +193,10 @@ export function FilterBar({ filter, options, counts }: Props) {
 						onChange={setOne("judgment")}
 						options={[
 							["all", "すべて"],
-							["none", "未判定"],
-							...judgments.map((j): [string, string] => [j, j]),
+							["none", "誰も判定していない"],
+							["mine_none", "自分が判定していない"],
+							["split", "判定が分かれている"],
+							...judgments.map((j): [string, string] => [j, `誰かが${j}`]),
 						]}
 					/>
 					<SelectField

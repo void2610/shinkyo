@@ -84,11 +84,16 @@ export const profileSchema = z.object({
 	ntfy_topic: z.string().optional(),
 	web: z
 		.object({
-			owner_logins: z.array(z.string()).default([]),
-			// tailscale serve で公開する URL の origin (例: https://m1.example.ts.net)
+			// Cloudflare Tunnel で公開する URL の origin (例: https://heya.example.com)
 			allowed_origins: z.array(z.url()).default([]),
+			// Cloudflare Access のチームのドメインとアプリの AUD タグ。未設定なら開発用に全員を local とみなす
+			access: z
+				.object({ team_domain: z.string().min(1), aud: z.string().min(1) })
+				.optional(),
+			// Access のメールアドレス → 画面に出す名前
+			people: z.record(z.string(), z.string()).default({}),
 		})
-		.default({ owner_logins: [], allowed_origins: [] }),
+		.default({ allowed_origins: [], people: {} }),
 });
 export type Profile = z.infer<typeof profileSchema>;
 

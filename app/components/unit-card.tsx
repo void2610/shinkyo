@@ -11,11 +11,22 @@ import {
 	unitPath,
 } from "../../src/web/format.ts";
 import type { UnitRow } from "../../src/web/queries.ts";
-import type { Role } from "../context";
-import { JudgmentControl } from "./judgment-control";
+import {
+	JudgmentControl,
+	myEvaluation,
+	OthersJudgments,
+} from "./judgment-control";
 import { Flags, ScoreBadge } from "./unit-badges";
 
-export function UnitCard({ unit, role }: { unit: UnitRow; role: Role }) {
+export function UnitCard({
+	unit,
+	person,
+	people,
+}: {
+	unit: UnitRow;
+	person: string;
+	people: Record<string, string>;
+}) {
 	const [first, ...restStations] = unit.stations;
 	const name = unitName(unit);
 	return (
@@ -79,6 +90,11 @@ export function UnitCard({ unit, role }: { unit: UnitRow; role: Role }) {
 					)}
 				</div>
 				<Flags flags={unit.flags} />
+				<OthersJudgments
+					evaluations={unit.evaluations}
+					person={person}
+					people={people}
+				/>
 				{unit.summary && (
 					<p className="line-clamp-2 text-sm text-muted-foreground">
 						{unit.summary}
@@ -91,8 +107,7 @@ export function UnitCard({ unit, role }: { unit: UnitRow; role: Role }) {
 				</span>
 				<JudgmentControl
 					unitKey={unit.unit_key}
-					judgment={unit.judgment}
-					role={role}
+					judgment={myEvaluation(unit.evaluations, person)?.judgment ?? null}
 				/>
 			</CardFooter>
 		</Card>

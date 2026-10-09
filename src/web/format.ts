@@ -48,3 +48,11 @@ export const imagePath = (listingId: string, index: number): string =>
 
 export const unitPath = (key: string): string =>
 	`/units/${encodeURIComponent(key)}`;
+
+// Access のメールアドレスに表示名が無ければ、@ より前を名前として出す
+export const displayName = (
+	people: Record<string, string>,
+	person: string,
+): string =>
+	people[person] ??
+	(person === "local" ? "自分" : (person.split("@")[0] ?? person));

@@ -7,6 +7,7 @@ import {
 	emptyFilter,
 	filterOptions,
 	listUnits,
+	setJudgment,
 	type UnitFilter,
 } from "../src/web/queries.ts";
 import { fixture, MONDAY_10_JST, memoryDb } from "./helpers.ts";
@@ -31,8 +32,8 @@ const keyOf = (listingId: string) =>
 			"SELECT unit_key FROM listings WHERE listing_id = ?",
 		)
 		.get(listingId)?.unit_key ?? "";
-const names = (f: Partial<UnitFilter>) =>
-	listUnits(db, { ...emptyFilter, ...f }, 2026)
+const names = (f: Partial<UnitFilter>, person = "a@example.com") =>
+	listUnits(db, { ...emptyFilter, ...f }, 2026, person)
 		.map((u) => `${u.layout}:${u.floor}`)
 		.sort();
 
@@ -85,6 +86,17 @@ describe("一覧の絞り込み", () => {
 			keyOf("900000000004"),
 		);
 		expect(filterOptions(db).layouts).toContain("1K");
+	});
+
+	test("判定は人ごとに付き、誰も・自分が未判定や、判定が分かれている部屋で絞り込める", () => {
+		setJudgment(db, keyOf("900000000001"), "a@example.com", "◎", at);
+		setJudgment(db, keyOf("900000000001"), "b@example.com", "×", at);
+		setJudgment(db, keyOf("900000000003"), "b@example.com", "◎", at);
+		expect(names({ judgment: "none" })).toEqual(["1K:2"]);
+		expect(names({ judgment: "mine_none" })).toEqual(["1K:2", "ワンルーム:-1"]);
+		expect(names({ judgment: "split" })).toEqual(["1LDK:3"]);
+		expect(names({ judgment: "◎" })).toEqual(["1LDK:3", "ワンルーム:-1"]);
+		expect(names({ judgment: "×" })).toEqual(["1LDK:3"]);
 	});
 
 	test("選択肢は実際の部屋から作る", () => {

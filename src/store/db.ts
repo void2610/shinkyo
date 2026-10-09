@@ -122,6 +122,19 @@ const migrations: string[] = [
 	`
 	ALTER TABLE listings ADD COLUMN notes TEXT;
 	`,
+	// 判定とメモは人ごとに持つ。units.judgment・units.memo は使わない
+	`
+	CREATE TABLE evaluations (
+		unit_key TEXT NOT NULL,
+		person TEXT NOT NULL,
+		judgment TEXT,
+		memo TEXT,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (unit_key, person)
+	);
+	INSERT INTO evaluations (unit_key, person, judgment, memo, updated_at)
+		SELECT unit_key, 'local', judgment, memo, updated_at FROM units WHERE judgment IS NOT NULL OR memo IS NOT NULL;
+	`,
 ];
 
 export function migrate(db: Database): void {

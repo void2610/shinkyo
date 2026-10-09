@@ -17,12 +17,12 @@ import { JobLocked, withLock } from "./lock.ts";
 import { createNotifier } from "./notify.ts";
 import { openDb } from "./store/db.ts";
 import { type HourRange, sleep, systemClock } from "./time.ts";
+import { accessIdentity, localIdentity } from "./web/identity.ts";
 import { createServer, loadBuild } from "./web/server.ts";
 
 export type JobOptions = {
 	dryRun: boolean;
 	port: number;
-	devOwner: boolean;
 	ignoreActiveHours: boolean;
 	install: boolean;
 	configDir: string;
@@ -137,7 +137,7 @@ const fetchJob: Job = async (options) => {
 	console.log(`写真の先回り取得 ${prefetched.fetched} 枚`);
 };
 
-const serveJob: Job = async ({ port, devOwner, configDir, dbPath }) => {
+const serveJob: Job = async ({ port, configDir, dbPath }) => {
 	// 画面はビルド済みの成果物を読むので、起動のたびに今のコードからビルドし直す
 	const built = Bun.spawnSync([process.execPath, "run", "build"], {
 		cwd: new URL("..", import.meta.url).pathname,
@@ -147,16 +147,24 @@ const serveJob: Job = async ({ port, devOwner, configDir, dbPath }) => {
 	const config = await loadConfig(configDir);
 	const db = openDb(dbPath);
 	const images = imageStore(config, db, dbPath);
+	const access = config.profile.web.access;
+	if (!access)
+		console.log(
+			"Cloudflare Access が未設定なので、全員を local として扱う (開発用)",
+		);
+	const identify = access
+		? accessIdentity({ teamDomain: access.team_domain, aud: access.aud })
+		: localIdentity;
 	const app = createServer({
 		db,
 		clock: systemClock,
 		images,
-		ownerLogins: config.profile.web.owner_logins,
+		identify,
+		people: config.profile.web.people,
 		allowedOrigins: config.profile.web.allowed_origins,
-		devOwner,
 		build: await loadBuild(),
 	});
-	// tailscale serve からだけ届くように、ループバックにしか bind しない
+	// cloudflared からだけ届くように、ループバックにしか bind しない
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port,
@@ -164,9 +172,7 @@ const serveJob: Job = async ({ port, devOwner, configDir, dbPath }) => {
 		idleTimeout: 60,
 		fetch: app.fetch,
 	});
-	console.log(
-		`http://127.0.0.1:${server.port} で待ち受け中${devOwner ? " (dev-owner: 全員が操作できる)" : ""}`,
-	);
+	console.log(`http://127.0.0.1:${server.port} で待ち受け中`);
 	await new Promise(() => {});
 };
 
@@ -216,7 +222,7 @@ export const jobs = {
 const isJobName = (name: string): name is keyof typeof jobs =>
 	Object.hasOwn(jobs, name);
 
-const usage = `使い方: shinkyo <${Object.keys(jobs).join("|")}> [--dry-run] [--ignore-active-hours] [--port 8787] [--dev-owner] [--install] [--config config] [--db data/shinkyo.db]`;
+const usage = `使い方: shinkyo <${Object.keys(jobs).join("|")}> [--dry-run] [--ignore-active-hours] [--port 8787] [--install] [--config config] [--db data/shinkyo.db]`;
 
 export async function main(argv: string[]): Promise<number> {
 	const { positionals, values } = parseArgs({
@@ -226,7 +232,6 @@ export async function main(argv: string[]): Promise<number> {
 			"dry-run": { type: "boolean", default: false },
 			"ignore-active-hours": { type: "boolean", default: false },
 			port: { type: "string", default: "8787" },
-			"dev-owner": { type: "boolean", default: false },
 			install: { type: "boolean", default: false },
 			config: { type: "string", default: "config" },
 			db: { type: "string", default: "data/shinkyo.db" },
@@ -242,7 +247,6 @@ export async function main(argv: string[]): Promise<number> {
 			dryRun: values["dry-run"],
 			ignoreActiveHours: values["ignore-active-hours"],
 			port: Number(values.port),
-			devOwner: values["dev-owner"],
 			install: values.install,
 			configDir: values.config,
 			dbPath: values.db,

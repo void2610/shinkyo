@@ -9,13 +9,14 @@ import {
 	ScrollRestoration,
 	useRouteLoaderData,
 } from "react-router";
-import { Badge } from "~/components/ui/badge";
+import { displayName } from "../src/web/format.ts";
 import type { Route } from "./+types/root";
 import { appContext } from "./context";
 import "./app.css";
 
 export function loader({ context }: Route.LoaderArgs) {
-	return { role: context.get(appContext).role };
+	const { person, people } = context.get(appContext);
+	return { name: displayName(people, person) };
 }
 
 // 描画前に配色を決めないと、ダークモードで一瞬白く光る
@@ -44,10 +45,10 @@ export function Layout({ children }: { children: ReactNode }) {
 							shinkyo
 						</Link>
 						<span className="text-sm text-muted-foreground">賃貸探し</span>
-						{data?.role === "viewer" && (
-							<Badge variant="secondary" className="ml-auto">
-								閲覧専用
-							</Badge>
+						{data && (
+							<span className="ml-auto text-sm text-muted-foreground">
+								{data.name}
+							</span>
 						)}
 					</div>
 				</header>

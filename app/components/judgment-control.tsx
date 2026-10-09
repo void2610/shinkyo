@@ -3,17 +3,16 @@ import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { ButtonGroup } from "~/components/ui/button-group";
 import { type Judgment, judgments } from "../../src/domain.ts";
-import { unitPath } from "../../src/web/format.ts";
-import type { Role } from "../context";
+import { displayName, unitPath } from "../../src/web/format.ts";
+import type { Evaluation } from "../../src/web/queries.ts";
 
+// 自分の判定を付けるボタン。押した人の判定として保存される
 export function JudgmentControl({
 	unitKey,
 	judgment,
-	role,
 }: {
 	unitKey: string;
 	judgment: Judgment | null;
-	role: Role;
 }) {
 	const fetcher = useFetcher();
 	// 送信中は押した値を先に表示し、サーバーの応答を待たせない
@@ -24,13 +23,6 @@ export function JudgmentControl({
 			: pending === ""
 				? null
 				: (pending as Judgment);
-	if (role === "viewer") {
-		return (
-			<Badge variant={current ? "default" : "outline"}>
-				{current ?? "未判定"}
-			</Badge>
-		);
-	}
 	return (
 		<ButtonGroup aria-label="判定">
 			{judgments.map((j) => (
@@ -54,3 +46,31 @@ export function JudgmentControl({
 		</ButtonGroup>
 	);
 }
+
+// 自分以外の人の判定を並べる
+export function OthersJudgments({
+	evaluations,
+	person,
+	people,
+}: {
+	evaluations: Evaluation[];
+	person: string;
+	people: Record<string, string>;
+}) {
+	const others = evaluations.filter((e) => e.person !== person && e.judgment);
+	if (others.length === 0) return null;
+	return (
+		<div className="flex flex-wrap gap-1">
+			{others.map((e) => (
+				<Badge key={e.person} variant="secondary" title={e.person}>
+					{displayName(people, e.person)} {e.judgment}
+				</Badge>
+			))}
+		</div>
+	);
+}
+
+export const myEvaluation = (
+	evaluations: Evaluation[],
+	person: string,
+): Evaluation | undefined => evaluations.find((e) => e.person === person);

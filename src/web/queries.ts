@@ -11,9 +11,22 @@ export const sortKeys = {
 } as const;
 export type SortKey = keyof typeof sortKeys;
 
+// none は誰も判定していない部屋、mine_none は自分が判定していない部屋、split は判定が分かれている部屋。
+// ◎○× は誰かがその判定を付けた部屋
+export const judgmentFilters = [
+	"all",
+	"none",
+	"mine_none",
+	"split",
+	"◎",
+	"○",
+	"×",
+] as const;
+export type JudgmentFilter = (typeof judgmentFilters)[number];
+
 export type UnitFilter = {
 	status: UnitStatus | "active" | "all";
-	judgment: Judgment | "none" | "all";
+	judgment: JudgmentFilter;
 	sort: SortKey;
 	// 家賃は管理費込みの円
 	maxRent: number | null;
@@ -46,11 +59,10 @@ export const emptyFilter: UnitFilter = {
 export type UnitRow = {
 	unit_key: string;
 	status: UnitStatus;
-	judgment: Judgment | null;
 	score: number | null;
 	flags: string[];
 	summary: string | null;
-	memo: string | null;
+	evaluations: Evaluation[];
 	apply_approved: boolean;
 	viewing_at: string | null;
 	next_action: string | null;
@@ -73,6 +85,14 @@ export type UnitRow = {
 	first_seen: string;
 	listing_count: number;
 	images: RoomImage[];
+};
+
+// 判定とメモは人ごとに持つ。person は Cloudflare Access のメールアドレス (開発時は local)
+export type Evaluation = {
+	person: string;
+	judgment: Judgment | null;
+	memo: string | null;
+	updated_at: string;
 };
 
 export type ListingRow = {
@@ -106,8 +126,9 @@ export type EventRow = {
 
 type RawUnitRow = Omit<
 	UnitRow,
-	"flags" | "stations" | "apply_approved" | "images"
+	"flags" | "stations" | "apply_approved" | "images" | "evaluations"
 > & {
+	evaluations: string;
 	images: string;
 	flags: string;
 	stations: string;
@@ -129,7 +150,9 @@ const unitSelect = `
 			COUNT(*) OVER (PARTITION BY unit_key) AS listing_count
 		FROM listings l
 	)
-	SELECT u.unit_key, u.status, u.judgment, u.base_score + COALESCE(u.adj_score, 0) AS score, u.flags, u.summary, u.memo,
+	SELECT u.unit_key, u.status, u.base_score + COALESCE(u.adj_score, 0) AS score, u.flags, u.summary,
+		(SELECT json_group_array(json_object('person', e.person, 'judgment', e.judgment, 'memo', e.memo, 'updated_at', e.updated_at))
+			FROM evaluations e WHERE e.unit_key = u.unit_key) AS evaluations,
 		u.apply_approved, u.viewing_at, u.next_action, u.updated_at,
 		r.listing_id, r.url, r.rent, r.admin_fee, r.deposit, r.key_money, r.layout, r.area_m2, r.built_age, r.built_ym,
 		r.floor, r.building_name, r.address, r.stations, r.orientation, r.first_seen, r.listing_count, r.images,
@@ -142,11 +165,13 @@ const toUnit = (raw: RawUnitRow & { min_walk?: number | null }): UnitRow => {
 		stations,
 		apply_approved,
 		images,
+		evaluations,
 		min_walk: _minWalk,
 		...rest
 	} = raw;
 	return {
 		...rest,
+		evaluations: JSON.parse(evaluations),
 		flags: JSON.parse(flags),
 		images: JSON.parse(images),
 		stations: JSON.parse(stations),
@@ -165,6 +190,7 @@ export function listUnits(
 	db: Database,
 	filter: UnitFilter,
 	year: number,
+	person: string,
 	limit = 300,
 ): UnitRow[] {
 	const where: string[] = [];
@@ -176,9 +202,19 @@ export function listUnits(
 	if (filter.status === "active") where.push("u.status != '見送り'");
 	else if (filter.status !== "all")
 		where.push(`u.status = ${bind("status", filter.status)}`);
-	if (filter.judgment === "none") where.push("u.judgment IS NULL");
+	const judged =
+		"SELECT 1 FROM evaluations e WHERE e.unit_key = u.unit_key AND e.judgment IS NOT NULL";
+	if (filter.judgment === "none") where.push(`NOT EXISTS (${judged})`);
+	else if (filter.judgment === "mine_none")
+		where.push(`NOT EXISTS (${judged} AND e.person = ${bind("me", person)})`);
+	else if (filter.judgment === "split")
+		where.push(
+			"(SELECT COUNT(DISTINCT e.judgment) FROM evaluations e WHERE e.unit_key = u.unit_key AND e.judgment IS NOT NULL) > 1",
+		);
 	else if (filter.judgment !== "all")
-		where.push(`u.judgment = ${bind("judgment", filter.judgment)}`);
+		where.push(
+			`EXISTS (${judged} AND e.judgment = ${bind("judgment", filter.judgment)})`,
+		);
 	if (filter.maxRent !== null)
 		where.push(`r.rent + r.admin_fee <= ${bind("maxRent", filter.maxRent)}`);
 	if (filter.minArea !== null)
@@ -296,30 +332,42 @@ export function getEvents(db: Database, key: string): EventRow[] {
 		.map((e) => ({ ...e, detail: e.detail ? JSON.parse(e.detail) : null }));
 }
 
-// 判定・メモ・申込の承認は人だけが書く列なので、変更はすべて actor=human で記録する
+const unitExists = (db: Database, key: string): boolean =>
+	db
+		.query<{ n: number }, [string]>(
+			"SELECT 1 AS n FROM units WHERE unit_key = ?",
+		)
+		.get(key) !== null;
+
+const evaluationOf = (db: Database, key: string, person: string) =>
+	db
+		.query<{ judgment: string | null; memo: string | null }, [string, string]>(
+			"SELECT judgment, memo FROM evaluations WHERE unit_key = ? AND person = ?",
+		)
+		.get(key, person);
+
+// 判定とメモは人が書く列。誰がいつ何を変えたかを Claude のセッションから追えるよう、変更前の値も履歴に残す
 export function setJudgment(
 	db: Database,
 	key: string,
+	person: string,
 	judgment: Judgment | null,
 	at: string,
 ): boolean {
 	return db.transaction(() => {
-		const current = db
-			.query<{ judgment: string | null }, [string]>(
-				"SELECT judgment FROM units WHERE unit_key = ?",
-			)
-			.get(key);
-		if (!current) return false;
-		if (current.judgment === judgment) return true;
+		if (!unitExists(db, key)) return false;
+		const before = evaluationOf(db, key, person)?.judgment ?? null;
+		if (before === judgment) return true;
 		db.query(
-			"UPDATE units SET judgment = ?, updated_at = ? WHERE unit_key = ?",
-		).run(judgment, at, key);
+			`INSERT INTO evaluations (unit_key, person, judgment, updated_at) VALUES (?, ?, ?, ?)
+			ON CONFLICT (unit_key, person) DO UPDATE SET judgment = excluded.judgment, updated_at = excluded.updated_at`,
+		).run(key, person, judgment, at);
 		recordEvent(db, {
 			unitKey: key,
 			type: "judgment",
 			actor: "human",
 			at,
-			detail: { from: current.judgment, to: judgment },
+			detail: { person, from: before, to: judgment },
 		});
 		return true;
 	})();
@@ -328,15 +376,26 @@ export function setJudgment(
 export function setMemo(
 	db: Database,
 	key: string,
+	person: string,
 	memo: string,
 	at: string,
 ): boolean {
 	return db.transaction(() => {
-		const changed = db
-			.query("UPDATE units SET memo = ?, updated_at = ? WHERE unit_key = ?")
-			.run(memo || null, at, key);
-		if (changed.changes === 0) return false;
-		recordEvent(db, { unitKey: key, type: "memo", actor: "human", at });
+		if (!unitExists(db, key)) return false;
+		const before = evaluationOf(db, key, person)?.memo ?? null;
+		const next = memo.trim() === "" ? null : memo;
+		if (before === next) return true;
+		db.query(
+			`INSERT INTO evaluations (unit_key, person, memo, updated_at) VALUES (?, ?, ?, ?)
+			ON CONFLICT (unit_key, person) DO UPDATE SET memo = excluded.memo, updated_at = excluded.updated_at`,
+		).run(key, person, next, at);
+		recordEvent(db, {
+			unitKey: key,
+			type: "memo",
+			actor: "human",
+			at,
+			detail: { person, before },
+		});
 		return true;
 	})();
 }
@@ -345,6 +404,7 @@ export function setMemo(
 export function approveApplication(
 	db: Database,
 	key: string,
+	person: string,
 	at: string,
 ): "ok" | "not_found" | "invalid_status" {
 	return db.transaction(() => {
@@ -363,6 +423,7 @@ export function approveApplication(
 			type: "apply_approved",
 			actor: "human",
 			at,
+			detail: { person },
 		});
 		return "ok";
 	})();
