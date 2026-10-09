@@ -12,6 +12,7 @@
         "embla-carousel-react": "^8.6.0",
         "hono": "^4.13.13",
         "isbot": "^5.2.2",
+        "jose": "^6.2.12",
         "lucide-react": "^1.54.0",
         "node-html-parser": "^9.0.4",
         "react": "^19.3.0",
