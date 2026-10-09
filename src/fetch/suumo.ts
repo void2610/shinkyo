@@ -54,11 +54,15 @@ export const pageLimits = (
 	stopOnStatus: policy.fetch.stop_on_status,
 });
 
-export const imageLimits = (policy: Policy): RequestLimits => ({
+// 人が画面を開いたときは時間帯で止めない。定期実行の先回り取得では activeHours を渡して守らせる
+export const imageLimits = (
+	policy: Policy,
+	options: { activeHours?: HourRange | null } = {},
+): RequestLimits => ({
 	kind: "image",
 	origin: SUUMO_IMAGE_ORIGIN,
 	paused: policy.paused,
-	activeHours: null,
+	activeHours: options.activeHours ?? null,
 	gapSec: policy.images.request_gap_sec,
 	jitterSec: policy.images.jitter_sec,
 	dailyCap: policy.images.daily_cap,
@@ -74,6 +78,8 @@ export type HttpClientDeps = {
 	random: () => number;
 	fetchImpl: (url: string, init: RequestInit) => Promise<Response>;
 };
+
+type Slot = { logId: number; startedAt: Date };
 
 export type FetchResult = {
 	status: number;
@@ -92,10 +98,11 @@ export class HttpClient {
 
 	constructor(private readonly deps: HttpClientDeps) {}
 
+	// 開始の間隔だけを直列に守り、ダウンロードは並行させる (ブラウザで見るときと同じ)
 	get(url: string): Promise<FetchResult> {
-		const run = this.queue.then(() => this.getNow(url));
-		this.queue = run.catch(() => {});
-		return run;
+		const reserved = this.queue.then(() => this.reserveFor(url));
+		this.queue = reserved.catch(() => {});
+		return reserved.then((slot) => this.perform(url, slot));
 	}
 
 	requestsToday(): number {
@@ -115,7 +122,7 @@ export class HttpClient {
 			.run(items, logId);
 	}
 
-	private async getNow(url: string): Promise<FetchResult> {
+	private async reserveFor(url: string): Promise<Slot> {
 		const { origin } = this.deps.limits;
 		if (new URL(url).origin !== origin)
 			throw new Error(`${origin} 以外の URL は取得しない: ${url}`);
@@ -123,7 +130,7 @@ export class HttpClient {
 		if (!isAllowed(parseRobots(await this.robotsTxt(), USER_AGENT), url)) {
 			throw new FetchStopped("robots", `robots.txt で除外されている: ${url}`);
 		}
-		return this.request(url);
+		return this.reserve(url);
 	}
 
 	private assertRunnable(): void {
@@ -179,11 +186,13 @@ export class HttpClient {
 		if (waitMs > 0) await sleep(waitMs);
 	}
 
-	private async request(
-		url: string,
-		asText = this.deps.limits.kind === "page",
-	): Promise<FetchResult> {
-		const { db, limits, clock, runId, fetchImpl } = this.deps;
+	private async request(url: string, asText?: boolean): Promise<FetchResult> {
+		return this.perform(url, await this.reserve(url), asText);
+	}
+
+	// 送信の開始を記録する。ここまでを直列に行うことで間隔と上限を守る
+	private async reserve(url: string): Promise<Slot> {
+		const { db, limits, clock, runId } = this.deps;
 		this.assertRunnable();
 		await this.waitGap();
 		const startedAt = clock();
@@ -204,6 +213,15 @@ export class HttpClient {
 					startedAt.toISOString(),
 					jst(startedAt).date,
 				)?.id ?? 0;
+		return { logId, startedAt };
+	}
+
+	private async perform(
+		url: string,
+		{ logId, startedAt }: Slot,
+		asText = this.deps.limits.kind === "page",
+	): Promise<FetchResult> {
+		const { db, limits, fetchImpl } = this.deps;
 		let res: Response;
 		let bytes: Uint8Array;
 		try {
