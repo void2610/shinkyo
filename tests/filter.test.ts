@@ -71,6 +71,15 @@ describe("一覧の絞り込み", () => {
 		]);
 	});
 
+	test("設備は選んだものをすべて備えた部屋だけを出す", () => {
+		// 詳細を取得した 1LDK だけが設備を持つ
+		expect(names({ features: ["バストイレ別"] })).toEqual(["1LDK:3"]);
+		expect(names({ features: ["バストイレ別", "宅配ボックス"] })).toEqual([
+			"1LDK:3",
+		]);
+		expect(names({ features: ["バストイレ別", "存在しない設備"] })).toEqual([]);
+	});
+
 	test("選択肢は実際の部屋から作る", () => {
 		expect(filterOptions(db).layouts.sort()).toEqual([
 			"1K",
@@ -78,6 +87,7 @@ describe("一覧の絞り込み", () => {
 			"ワンルーム",
 		]);
 		expect(filterOptions(db).stations).toContain("梅");
+		expect(filterOptions(db).features).toContain("バストイレ別");
 	});
 });
 
@@ -85,7 +95,7 @@ describe("URL からの読み取り", () => {
 	test("家賃は万円で受け取り円にし、タグは +/- で向きを分ける", () => {
 		const f = parseFilter(
 			new URLSearchParams(
-				"max_rent=10.5&min_area=25&layout=1K&layout=1LDK&tag=%2B北向き&tag=-定期借家&tag=&station=梅",
+				"max_rent=10.5&min_area=25&layout=1K&layout=1LDK&tag=%2B北向き&tag=-定期借家&tag=&station=梅&feature=温水洗浄便座",
 			),
 		);
 		expect(f).toMatchObject({
@@ -95,6 +105,7 @@ describe("URL からの読み取り", () => {
 			withFlags: ["北向き"],
 			withoutFlags: ["定期借家"],
 			station: "梅",
+			features: ["温水洗浄便座"],
 		});
 	});
 

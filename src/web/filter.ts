@@ -40,5 +40,6 @@ export function parseFilter(query: URLSearchParams): UnitFilter {
 		withoutFlags: tags
 			.filter((t) => t.startsWith("-"))
 			.map((t) => t.slice(1) as UnitFlag),
+		features: query.getAll("feature").filter(Boolean),
 	};
 }

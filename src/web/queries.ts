@@ -24,6 +24,8 @@ export type UnitFilter = {
 	station: string | null;
 	withFlags: UnitFlag[];
 	withoutFlags: UnitFlag[];
+	// SUUMO の「部屋の特徴・設備」の表記。選んだものをすべて備えた部屋だけを出す
+	features: string[];
 };
 
 export const emptyFilter: UnitFilter = {
@@ -38,6 +40,7 @@ export const emptyFilter: UnitFilter = {
 	station: null,
 	withFlags: [],
 	withoutFlags: [],
+	features: [],
 };
 
 export type UnitRow = {
@@ -206,6 +209,12 @@ export function listUnits(
 			`NOT EXISTS (SELECT 1 FROM json_each(u.flags) WHERE value = ${bind(`without${i}`, flag)})`,
 		);
 	});
+	// 設備は詳細を取得した掲載にしか無いので、部屋のどれかの掲載が備えていればよい
+	filter.features.forEach((feature, i) => {
+		where.push(
+			`EXISTS (SELECT 1 FROM listings fl, json_each(fl.features) f WHERE fl.unit_key = u.unit_key AND f.value = ${bind(`feature${i}`, feature)})`,
+		);
+	});
 	const sql = `${unitSelect} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${orderBy[filter.sort]} LIMIT ${limit}`;
 	return db
 		.query<RawUnitRow, [Record<string, string | number>]>(sql)
@@ -213,7 +222,11 @@ export function listUnits(
 		.map(toUnit);
 }
 
-export type FilterOptions = { layouts: string[]; stations: string[] };
+export type FilterOptions = {
+	layouts: string[];
+	stations: string[];
+	features: string[];
+};
 
 // 選択肢は実際に集めた部屋から作る。見送りの部屋しか無い間取りや駅は出さない
 export function filterOptions(db: Database): FilterOptions {
@@ -232,7 +245,14 @@ export function filterOptions(db: Database): FilterOptions {
 		)
 		.all()
 		.map((r) => r.station);
-	return { layouts, stations };
+	const features = db
+		.query<{ feature: string }, []>(
+			`SELECT f.value AS feature FROM listings l JOIN units u ON u.unit_key = l.unit_key, json_each(l.features) f
+			WHERE u.status != '見送り' GROUP BY feature ORDER BY COUNT(DISTINCT l.unit_key) DESC, feature`,
+		)
+		.all()
+		.map((r) => r.feature);
+	return { layouts, stations, features };
 }
 
 export function countByStatus(db: Database): Map<string, number> {

@@ -33,6 +33,11 @@ import {
 	type UnitFilter,
 } from "../../src/web/queries.ts";
 
+const FEATURES_SHOWN = 30;
+// 選んだボタンが薄い灰色だと見分けにくいので、塗りつぶして目立たせる
+const PRESSED =
+	"data-[pressed]:bg-primary data-[pressed]:text-primary-foreground";
+
 type Props = {
 	filter: UnitFilter;
 	options: FilterOptions;
@@ -143,8 +148,19 @@ export function FilterBar({ filter, options, counts }: Props) {
 		filter.layouts.length +
 		(filter.station ? 1 : 0) +
 		filter.withFlags.length +
-		filter.withoutFlags.length;
+		filter.withoutFlags.length +
+		filter.features.length;
 	const [open, setOpen] = useState(advanced > 0);
+	const [allFeatures, setAllFeatures] = useState(false);
+	// 設備は100種類近くあるので、多い順に絞って出す。選んだものは常に出す
+	const shownFeatures = allFeatures
+		? options.features
+		: [
+				...new Set([
+					...options.features.slice(0, FEATURES_SHOWN),
+					...filter.features,
+				]),
+			];
 
 	const setOne = (name: string) => (value: string) =>
 		set((p) => {
@@ -256,11 +272,54 @@ export function FilterBar({ filter, options, counts }: Props) {
 								className="flex-wrap justify-start"
 							>
 								{options.layouts.map((layout) => (
-									<ToggleGroupItem key={layout} value={layout}>
+									<ToggleGroupItem
+										key={layout}
+										value={layout}
+										className={PRESSED}
+									>
 										{layout}
 									</ToggleGroupItem>
 								))}
 							</ToggleGroup>
+						</div>
+						<div className="grid gap-2">
+							<span className="text-xs text-muted-foreground">
+								設備 (選んだものをすべて備えた部屋)
+							</span>
+							<ToggleGroup
+								multiple
+								variant="outline"
+								size="sm"
+								value={filter.features}
+								onValueChange={(values: string[]) =>
+									set((p) => {
+										p.delete("feature");
+										for (const v of values) p.append("feature", v);
+									})
+								}
+								className="flex-wrap justify-start"
+							>
+								{shownFeatures.map((feature) => (
+									<ToggleGroupItem
+										key={feature}
+										value={feature}
+										className={PRESSED}
+									>
+										{feature}
+									</ToggleGroupItem>
+								))}
+							</ToggleGroup>
+							{options.features.length > FEATURES_SHOWN && (
+								<button
+									type="button"
+									className="justify-self-start text-xs text-muted-foreground underline-offset-4 hover:underline"
+									onClick={() => setAllFeatures(!allFeatures)}
+								>
+									{allFeatures
+										? "よく使う設備だけ表示"
+										: `すべての設備を表示 (${options.features.length})`}
+								</button>
+							)}
 						</div>
 						<div className="max-w-xs">
 							<SelectField
