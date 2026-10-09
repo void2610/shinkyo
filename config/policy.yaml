@@ -5,7 +5,7 @@ fetch:
   request_gap_sec: 10               # 1リクエストごとの最小間隔
   jitter_sec: 3
   max_pages_per_search: 3
-  daily_request_cap: 150
+  daily_request_cap: 300
   stop_on_status: [403, 429, 503]
 images:                             # 物件写真。候補のサムネイルと間取り図は定期実行で先に取得し、残りは画面で見たときに取得する
   request_gap_sec: 0.2              # ブラウザで SUUMO を見るときの同時読み込みより控えめ
