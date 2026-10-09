@@ -1,0 +1,7 @@
+件名：Re: {subject}
+
+ご連絡ありがとうございます。{unit_name}の内見は、次のいずれかでお願いできますでしょうか。
+
+{slots}
+
+{signature}
