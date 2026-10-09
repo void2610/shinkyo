@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { parseDetailPage, parseListPage } from "../src/fetch/parse.ts";
 import { applyDetail, setFlag, upsertListing } from "../src/store/listings.ts";
-import { parseFilter } from "../src/web/app.tsx";
+import { parseFilter } from "../src/web/filter.ts";
 import {
 	emptyFilter,
 	filterOptions,

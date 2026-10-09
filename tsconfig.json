@@ -3,10 +3,9 @@
 		"target": "ESNext",
 		"module": "Preserve",
 		"moduleResolution": "bundler",
-		"lib": ["ESNext"],
-		"types": ["bun"],
+		"lib": ["ESNext", "DOM", "DOM.Iterable"],
+		"types": ["bun", "vite/client"],
 		"jsx": "react-jsx",
-		"jsxImportSource": "hono/jsx",
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
 		"exactOptionalPropertyTypes": true,
@@ -16,7 +15,18 @@
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
 		"skipLibCheck": true,
-		"resolveJsonModule": true
+		"resolveJsonModule": true,
+		"rootDirs": [".", "./.react-router/types"],
+		"paths": {
+			"~/*": ["./app/*"]
+		}
 	},
-	"include": ["src", "tests"]
+	"include": [
+		"src",
+		"tests",
+		"app",
+		".react-router/types/**/*",
+		"react-router.config.ts",
+		"vite.config.ts"
+	]
 }

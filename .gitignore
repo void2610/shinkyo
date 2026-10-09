@@ -1,5 +1,7 @@
 node_modules/
 dist/
+build/
+.react-router/
 result
 
 # 実データと個人情報 (公開リポジトリのため)

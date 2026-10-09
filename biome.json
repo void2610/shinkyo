@@ -7,7 +7,13 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!tests/fixtures"]
+		"includes": [
+			"**",
+			"!tests/fixtures",
+			"!app/components/ui",
+			"!build",
+			"!.react-router"
+		]
 	},
 	"formatter": {
 		"enabled": true,
@@ -30,6 +36,11 @@
 			"source": {
 				"organizeImports": "on"
 			}
+		}
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
 		}
 	}
 }

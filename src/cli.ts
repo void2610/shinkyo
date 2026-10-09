@@ -17,7 +17,7 @@ import { JobLocked, withLock } from "./lock.ts";
 import { createNotifier } from "./notify.ts";
 import { openDb } from "./store/db.ts";
 import { type HourRange, sleep, systemClock } from "./time.ts";
-import { createApp } from "./web/app.tsx";
+import { createServer, loadBuild } from "./web/server.ts";
 
 export type JobOptions = {
 	dryRun: boolean;
@@ -137,16 +137,23 @@ const fetchJob: Job = async (options) => {
 };
 
 const serveJob: Job = async ({ port, devOwner, configDir, dbPath }) => {
+	// 画面はビルド済みの成果物を読むので、起動のたびに今のコードからビルドし直す
+	const built = Bun.spawnSync([process.execPath, "run", "build"], {
+		cwd: new URL("..", import.meta.url).pathname,
+	});
+	if (built.exitCode !== 0)
+		throw new Error(`画面のビルドに失敗した\n${built.stderr.toString()}`);
 	const config = await loadConfig(configDir);
 	const db = openDb(dbPath);
 	const images = imageStore(config, db, dbPath);
-	const app = createApp({
+	const app = createServer({
 		db,
 		clock: systemClock,
 		images,
 		ownerLogins: config.profile.web.owner_logins,
 		allowedOrigins: config.profile.web.allowed_origins,
 		devOwner,
+		build: await loadBuild(),
 	});
 	// tailscale serve からだけ届くように、ループバックにしか bind しない
 	const server = Bun.serve({

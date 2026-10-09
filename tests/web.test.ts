@@ -2,17 +2,19 @@ import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { parseDetailPage, parseListPage } from "../src/fetch/parse.ts";
 import { applyDetail, upsertListing } from "../src/store/listings.ts";
-import { createApp } from "../src/web/app.tsx";
+import { createServer, loadBuild } from "../src/web/server.ts";
 import { FakeClock, fixture, MONDAY_10_JST, memoryDb } from "./helpers.ts";
 
 const OWNER = "owner@example.com";
 const page = parseListPage(await fixture("list_p1.html"));
 const detail = parseDetailPage(await fixture("detail.html"));
 const imageFile = `${import.meta.dir}/fixtures/suumo/detail.html`;
+// 画面は react-router build の成果物を読む (bun run test が先にビルドする)
+const build = await loadBuild();
 const requested: string[] = [];
 
 let db: Database;
-let app: ReturnType<typeof createApp>;
+let app: ReturnType<typeof createServer>;
 let key: string;
 
 beforeEach(() => {
@@ -27,11 +29,11 @@ beforeEach(() => {
 				"SELECT unit_key FROM listings WHERE listing_id = '900000000001'",
 			)
 			.get()?.unit_key ?? "";
-	app = createApp({
+	app = createServer({
 		db,
 		clock: new FakeClock(MONDAY_10_JST).read,
 		images: {
-			get: async (url) => {
+			get: async (url: string) => {
 				requested.push(url);
 				return { path: imageFile, contentType: "image/jpeg" };
 			},
@@ -39,10 +41,19 @@ beforeEach(() => {
 		ownerLogins: [OWNER],
 		allowedOrigins: ["https://m1.example.ts.net"],
 		devOwner: false,
+		build,
 	});
 });
 
 const unitPath = () => `/units/${encodeURIComponent(key)}`;
+
+// React は隣り合う文字列の間に <!-- --> を挟むので、本文を比べるときは取り除く
+const text = async (res: Response) =>
+	(await res.text()).replaceAll("<!-- -->", "");
+const get = (path: string, login?: string) =>
+	app.request(path, {
+		headers: login ? { "tailscale-user-login": login } : {},
+	});
 
 const post = (
 	path: string,
@@ -70,16 +81,16 @@ const unit = () =>
 
 describe("閲覧専用の共有", () => {
 	test("利用者ヘッダーが無い閲覧者には判定ボタンを出さない", async () => {
-		const html = await (await app.request("/")).text();
+		const html = await text(await get("/"));
 		expect(html).toContain("閲覧専用");
 		expect(html).toContain("テストハイツ桜A/テストハイツ桜B");
-		expect(html).not.toContain("hx-post");
+		expect(html).not.toContain('aria-label="判定"');
 	});
 
 	test("本人以外のログインからの書き込みは 403", async () => {
 		const res = await post(
-			`${unitPath()}/judgment`,
-			{ judgment: "◎" },
+			unitPath(),
+			{ intent: "judgment", judgment: "◎" },
 			{ "tailscale-user-login": "guest@example.com" },
 		);
 		expect(res.status).toBe(403);
@@ -87,17 +98,15 @@ describe("閲覧専用の共有", () => {
 	});
 
 	test("本人には判定ボタンを出す", async () => {
-		const html = await (
-			await app.request("/", { headers: { "tailscale-user-login": OWNER } })
-		).text();
+		const html = await text(await get("/", OWNER));
 		expect(html).not.toContain("閲覧専用");
-		expect(html).toContain("hx-post");
+		expect(html).toContain('aria-label="判定"');
 	});
 });
 
 describe("判定", () => {
 	test("本人が判定を付けると保存され、人の操作として履歴に残る", async () => {
-		const res = await post(`${unitPath()}/judgment`, { judgment: "◎" });
+		const res = await post(unitPath(), { intent: "judgment", judgment: "◎" });
 		expect(res.status).toBe(200);
 		expect(unit()?.judgment).toBe("◎");
 		const event = db
@@ -110,21 +119,21 @@ describe("判定", () => {
 	});
 
 	test("空の値で判定を外せる", async () => {
-		await post(`${unitPath()}/judgment`, { judgment: "○" });
-		await post(`${unitPath()}/judgment`, { judgment: "" });
+		await post(unitPath(), { intent: "judgment", judgment: "○" });
+		await post(unitPath(), { intent: "judgment", judgment: "" });
 		expect(unit()?.judgment).toBeNull();
 	});
 
 	test("決められた記号以外は 400", async () => {
 		expect(
-			(await post(`${unitPath()}/judgment`, { judgment: "△" })).status,
+			(await post(unitPath(), { intent: "judgment", judgment: "△" })).status,
 		).toBe(400);
 	});
 
 	test("他サイトからの POST は本人のヘッダーが付いていても拒否する", async () => {
 		const res = await post(
-			`${unitPath()}/judgment`,
-			{ judgment: "◎" },
+			unitPath(),
+			{ intent: "judgment", judgment: "◎" },
 			{ origin: "https://evil.example" },
 		);
 		expect(res.status).toBe(403);
@@ -133,117 +142,87 @@ describe("判定", () => {
 
 	test("tailscale serve の公開 URL からの POST は受け付ける", async () => {
 		const res = await post(
-			`${unitPath()}/judgment`,
-			{ judgment: "◎" },
+			unitPath(),
+			{ intent: "judgment", judgment: "◎" },
 			{ origin: "https://m1.example.ts.net" },
 		);
 		expect(res.status).toBe(200);
+		expect(unit()?.judgment).toBe("◎");
 	});
 });
 
 describe("申込の承認とメモ", () => {
 	test("内見済でない部屋の申込は承認できない", async () => {
-		expect((await post(`${unitPath()}/approve`, {})).status).toBe(409);
+		expect((await post(unitPath(), { intent: "approve" })).status).toBe(409);
 		expect(unit()?.apply_approved).toBe(0);
 	});
 
 	test("内見済の部屋は承認できる", async () => {
 		db.query("UPDATE units SET status = '内見済' WHERE unit_key = ?").run(key);
-		expect(
-			(await post(`${unitPath()}/approve`, {}, { "hx-request": "true" }))
-				.status,
-		).toBe(200);
+		expect((await post(unitPath(), { intent: "approve" })).status).toBe(200);
 		expect(unit()?.apply_approved).toBe(1);
 	});
 
 	test("メモを保存できる", async () => {
-		const res = await post(
-			`${unitPath()}/memo`,
-			{ memo: "日当たり良好" },
-			{ "hx-request": "true" },
-		);
-		expect(await res.text()).toContain("保存しました");
+		await post(unitPath(), { intent: "memo", memo: "日当たり良好" });
 		expect(unit()?.memo).toBe("日当たり良好");
 	});
 });
 
 describe("画面", () => {
 	test("詳細ページに同じ部屋の掲載が並ぶ", async () => {
-		const res = await app.request(unitPath());
+		const res = await get(unitPath());
 		expect(res.status).toBe(200);
-		expect(await res.text()).toContain("掲載 (2)");
+		expect(await text(res)).toContain("掲載 (2)");
 	});
 
 	test("存在しない部屋は 404", async () => {
-		expect((await app.request("/units/none")).status).toBe(404);
+		expect((await get("/units/none")).status).toBe(404);
 	});
 
 	test("状態で絞り込める", async () => {
-		const html = await (await app.request("/?status=見送り")).text();
-		expect(html).toContain("該当する部屋はありません");
-	});
-
-	test("htmx を自前で配信する", async () => {
-		const res = await app.request("/static/htmx.min.js");
-		expect(res.status).toBe(200);
-		expect(res.headers.get("content-type")).toContain("javascript");
+		expect(await text(await get("/?status=見送り"))).toContain(
+			"該当する部屋はありません",
+		);
 	});
 
 	test("一覧のカードに代表の掲載の1枚目を出す", async () => {
-		const html = await (await app.request("/")).text();
-		expect(html).toContain('src="/images/900000000001/0"');
+		expect(await text(await get("/"))).toContain(
+			'src="/images/900000000001/0"',
+		);
 	});
 
 	test("間取り図は写真とは別の枠に、切り取らずに常に出す", async () => {
-		const html = await (await app.request(unitPath())).text();
-		const plan = html.slice(
-			html.indexOf(">間取り図</div>"),
-			html.indexOf(">概要</div>"),
-		);
-		expect(plan).toContain(
-			'class="d-block w-100 floor-plan" src="/images/900000000002/1"',
-		);
-		expect(plan).not.toContain('loading="lazy"');
-		const grid = html.slice(
-			html.indexOf("室内・設備 ("),
-			html.indexOf('class="modal fade"'),
-		);
+		const html = await text(await get(unitPath()));
+		const plan = html.slice(html.indexOf(">間取り図<"), html.indexOf(">概要<"));
+		expect(plan).toContain('src="/images/900000000002/1"');
+		expect(plan).toContain("object-contain");
+		const grid = html.slice(html.indexOf("室内・設備 ("));
 		expect(grid).toContain("室内・設備 (1)");
 		expect(grid).toContain("建物・共用部 (1)");
 		expect(grid).not.toContain('src="/images/900000000002/1"');
 	});
 
-	test("拡大表示では間取り図から順に、すべての写真を送れる", async () => {
-		const html = await (await app.request(unitPath())).text();
-		const carousel = html.slice(html.indexOf('class="carousel-inner"'));
-		expect(carousel.match(/carousel-item/g)).toHaveLength(3);
-		expect(carousel.indexOf('data-caption="間取り図"')).toBeLessThan(
-			carousel.indexOf('data-caption="居室・リビング"'),
+	test("写真は同じページで拡大する (別ページへのリンクにしない)", async () => {
+		const html = await text(await get(unitPath()));
+		expect(html).toContain('aria-label="間取り図を拡大"');
+		expect(html).toContain('aria-label="居室・リビングを拡大"');
+		expect(html).not.toMatch(/<a [^>]*href="\/images\//);
+	});
+
+	test("見出しのすぐ下に家賃を大きく出す", async () => {
+		const html = await text(await get(unitPath()));
+		expect(html).toMatch(/data-testid="rent">12\.5万円</);
+		expect(html.indexOf('data-testid="rent"')).toBeLessThan(
+			html.indexOf(">間取り図<"),
 		);
 	});
 
 	test("画像は閲覧者にも返し、掲載に無い番号は 404", async () => {
-		const res = await app.request("/images/900000000002/1");
+		const res = await get("/images/900000000002/1");
 		expect(res.status).toBe(200);
 		expect(res.headers.get("content-type")).toBe("image/jpeg");
 		expect(requested).toEqual([detail.images[1]?.url ?? ""]);
-		expect((await app.request("/images/900000000002/9")).status).toBe(404);
-	});
-
-	test("写真は別ページへ移らず、同じページのモーダルで拡大する", async () => {
-		const html = await (await app.request(unitPath())).text();
-		expect(html).toContain('data-bs-toggle="modal"');
-		expect(html).toContain("carousel slide");
-		expect(html).not.toContain('target="_blank" rel="noreferrer"><img');
-		expect(html).toContain('data-slide="0"');
-	});
-
-	test("見出しのすぐ下に家賃を大きく出す", async () => {
-		const html = await (await app.request(unitPath())).text();
-		const head = html.slice(
-			html.indexOf("<h1"),
-			html.indexOf(">間取り図</div>"),
-		);
-		expect(head).toContain('<span class="fs-2 fw-bold lh-sm">12.5万円</span>');
+		expect((await get("/images/900000000002/9")).status).toBe(404);
 	});
 });
