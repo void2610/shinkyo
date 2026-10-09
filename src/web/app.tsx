@@ -1,0 +1,161 @@
+import type { Database } from "bun:sqlite";
+import { Hono } from "hono";
+import { csrf } from "hono/csrf";
+import { secureHeaders } from "hono/secure-headers";
+import { z } from "zod";
+import { judgments, unitStatuses } from "../domain.ts";
+import type { Clock } from "../time.ts";
+import {
+	approveApplication,
+	countByStatus,
+	getEvents,
+	getListings,
+	getUnit,
+	listUnits,
+	setJudgment,
+	setMemo,
+	sortKeys,
+} from "./queries.ts";
+import {
+	ApproveControl,
+	JudgmentControl,
+	MemoSaved,
+	NotFoundPage,
+	type Role,
+	UnitDetailPage,
+	UnitListPage,
+} from "./views.tsx";
+
+export type WebOptions = {
+	db: Database;
+	clock: Clock;
+	ownerLogins: string[];
+	allowedOrigins: string[];
+	// 開発時に tailscale serve を通さず操作するためのフラグ
+	devOwner: boolean;
+};
+
+const filterSchema = z.object({
+	status: z.enum(["active", "all", ...unitStatuses]).catch("active"),
+	judgment: z.enum(["all", "none", ...judgments]).catch("all"),
+	sort: z.enum(Object.keys(sortKeys) as [keyof typeof sortKeys]).catch("new"),
+});
+
+const judgmentForm = z.object({
+	judgment: z.union([z.enum(judgments), z.literal("").transform(() => null)]),
+});
+const memoForm = z.object({ memo: z.string().max(10_000) });
+
+const staticFiles = {
+	"/static/htmx.min.js": {
+		url: import.meta.resolve("htmx.org/dist/htmx.min.js"),
+		type: "text/javascript",
+	},
+	"/static/style.css": {
+		url: new URL("./style.css", import.meta.url).href,
+		type: "text/css",
+	},
+} as const;
+
+export function createApp(options: WebOptions) {
+	const { db, clock } = options;
+	const app = new Hono<{ Variables: { role: Role } }>();
+
+	app.use(secureHeaders());
+	// 閲覧者は tailscale serve が付ける利用者ヘッダーで見分ける。ヘッダーが無ければ閲覧専用に倒す
+	app.use(async (c, next) => {
+		const login = c.req.header("Tailscale-User-Login");
+		const isOwner =
+			options.devOwner ||
+			(login !== undefined && options.ownerLogins.includes(login));
+		c.set("role", isOwner ? "owner" : "viewer");
+		await next();
+	});
+	// tailscale serve は他サイトからのリクエストにも利用者ヘッダーを付けるので、Origin で CSRF を防ぐ
+	app.use(
+		csrf({
+			origin: (origin, c) =>
+				origin === new URL(c.req.url).origin ||
+				options.allowedOrigins.includes(origin),
+		}),
+	);
+	app.on(["POST", "PUT", "PATCH", "DELETE"], "*", async (c, next) => {
+		if (c.get("role") !== "owner") return c.text("閲覧専用です", 403);
+		await next();
+	});
+
+	for (const [path, file] of Object.entries(staticFiles)) {
+		app.get(path, (c) => {
+			c.header("content-type", file.type);
+			c.header("cache-control", "public, max-age=3600");
+			return c.body(Bun.file(new URL(file.url)).stream());
+		});
+	}
+
+	app.get("/", (c) => {
+		const filter = filterSchema.parse(c.req.query());
+		return c.html(
+			<UnitListPage
+				units={listUnits(db, filter)}
+				filter={filter}
+				counts={countByStatus(db)}
+				access={c.get("role")}
+			/>,
+		);
+	});
+
+	app.get("/units/:key", (c) => {
+		const key = c.req.param("key");
+		const unit = getUnit(db, key);
+		if (!unit) return c.html(<NotFoundPage access={c.get("role")} />, 404);
+		return c.html(
+			<UnitDetailPage
+				unit={unit}
+				listings={getListings(db, key)}
+				events={getEvents(db, key)}
+				access={c.get("role")}
+			/>,
+		);
+	});
+
+	app.post("/units/:key/judgment", async (c) => {
+		const key = c.req.param("key");
+		const form = judgmentForm.safeParse(await c.req.parseBody());
+		if (!form.success) return c.text("判定の値が不正です", 400);
+		if (!setJudgment(db, key, form.data.judgment, clock().toISOString()))
+			return c.text("部屋が見つかりません", 404);
+		return c.html(
+			<JudgmentControl
+				unitKey={key}
+				judgment={form.data.judgment}
+				access="owner"
+			/>,
+		);
+	});
+
+	app.post("/units/:key/memo", async (c) => {
+		const key = c.req.param("key");
+		const form = memoForm.safeParse(await c.req.parseBody());
+		if (!form.success) return c.text("メモが長すぎます", 400);
+		const at = clock().toISOString();
+		if (!setMemo(db, key, form.data.memo, at))
+			return c.text("部屋が見つかりません", 404);
+		if (c.req.header("HX-Request")) return c.html(<MemoSaved at={at} />);
+		return c.redirect(`/units/${encodeURIComponent(key)}`, 303);
+	});
+
+	app.post("/units/:key/approve", (c) => {
+		const key = c.req.param("key");
+		const result = approveApplication(db, key, clock().toISOString());
+		if (result === "not_found") return c.text("部屋が見つかりません", 404);
+		if (result === "invalid_status")
+			return c.text("申込を承認できるのは内見済の部屋だけです", 409);
+		const unit = getUnit(db, key);
+		if (!unit) return c.text("部屋が見つかりません", 404);
+		if (c.req.header("HX-Request"))
+			return c.html(<ApproveControl unit={unit} access="owner" />);
+		return c.redirect(`/units/${encodeURIComponent(key)}`, 303);
+	});
+
+	return app;
+}
