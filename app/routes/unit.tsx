@@ -193,13 +193,15 @@ function Memo({ unit, role }: { unit: UnitRow; role: Role }) {
 	if (role === "viewer")
 		return <p className="text-sm whitespace-pre-wrap">{unit.memo ?? "なし"}</p>;
 	return (
-		<fetcher.Form method="post" className="grid h-full gap-3">
+		<fetcher.Form method="post" className="grid gap-2">
 			<input type="hidden" name="intent" value="memo" />
 			<Textarea
 				name="memo"
+				rows={2}
 				defaultValue={unit.memo ?? ""}
 				aria-label="評価メモ"
-				className="min-h-40"
+				placeholder="内見や比較で気づいたこと"
+				className="min-h-0 resize-y"
 			/>
 			<div className="flex items-center justify-between">
 				<span className="text-xs text-muted-foreground">
@@ -209,7 +211,7 @@ function Memo({ unit, role }: { unit: UnitRow; role: Role }) {
 							? `${formatAt(fetcher.data.at)} に保存しました`
 							: ""}
 				</span>
-				<Button type="submit" size="sm">
+				<Button type="submit" size="xs" variant="outline">
 					保存
 				</Button>
 			</div>
@@ -282,12 +284,28 @@ export default function UnitPage({ loaderData }: Route.ComponentProps) {
 						/>
 						<ApproveControl unit={unit} role={role} />
 					</div>
+					<div className="grid gap-1.5">
+						<span className="text-xs text-muted-foreground">評価メモ</span>
+						<Memo unit={unit} role={role} />
+					</div>
 				</div>
 				{/* PC で見出しの右が空くので、比較で一番見る間取り図を置く */}
 				<FloorPlans photos={photos} onOpen={setOpenAt} />
 			</div>
 
-			<div className="mb-8 grid gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+			{photos.length > 0 && (
+				<div className="mb-8">
+					<Gallery photos={photos} onOpen={setOpenAt} />
+				</div>
+			)}
+			<PhotoViewer
+				key={openAt ?? "closed"}
+				photos={photos}
+				openAt={openAt}
+				onClose={() => setOpenAt(null)}
+			/>
+
+			<div className="grid gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 				<Card>
 					<CardHeader>
 						<CardTitle>概要</CardTitle>
@@ -336,78 +354,58 @@ export default function UnitPage({ loaderData }: Route.ComponentProps) {
 						</dl>
 					</CardContent>
 				</Card>
-				<Card>
-					<CardHeader>
-						<CardTitle>評価メモ</CardTitle>
-					</CardHeader>
-					<CardContent className="flex-1">
-						<Memo unit={unit} role={role} />
-					</CardContent>
-				</Card>
-			</div>
-
-			{photos.length > 0 && (
-				<div className="mb-8">
-					<Gallery photos={photos} onOpen={setOpenAt} />
-				</div>
-			)}
-			<PhotoViewer
-				key={openAt ?? "closed"}
-				photos={photos}
-				openAt={openAt}
-				onClose={() => setOpenAt(null)}
-			/>
-
-			<div className="grid gap-6 lg:grid-cols-2">
-				<Card>
-					<CardHeader>
-						<CardTitle>掲載 ({listings.length})</CardTitle>
-					</CardHeader>
-					<CardContent className="divide-y">
-						{listings.map((l) => (
-							<div
-								key={l.listing_id}
-								className="flex flex-wrap items-baseline justify-between gap-x-3 py-2.5"
-							>
-								<a
-									className="text-sm font-medium underline-offset-4 hover:underline"
-									href={l.url}
-									target="_blank"
-									rel="noreferrer noopener"
+				<div className="grid content-start gap-6">
+					<Card>
+						<CardHeader>
+							<CardTitle>掲載 ({listings.length})</CardTitle>
+						</CardHeader>
+						<CardContent className="divide-y">
+							{listings.map((l) => (
+								<div
+									key={l.listing_id}
+									className="flex flex-wrap items-baseline justify-between gap-x-3 py-2.5"
 								>
-									{l.agent_name ?? "業者名未取得"}
-								</a>
-								<span className="text-sm">
-									{formatMan(l.rent)} + {formatMan(l.admin_fee)}
-								</span>
-								<span className="w-full text-xs text-muted-foreground">
-									{formatAt(l.first_seen)} 〜 {formatAt(l.last_seen)}
-									{l.missing_runs > 0 && `（一覧に無い: ${l.missing_runs} 回）`}
-								</span>
-							</div>
-						))}
-					</CardContent>
-				</Card>
-				<Card>
-					<CardHeader>
-						<CardTitle>履歴</CardTitle>
-					</CardHeader>
-					<CardContent className="divide-y">
-						{events.map((e) => (
-							<div key={e.id} className="flex gap-3 py-2 text-sm">
-								<time className="shrink-0 text-muted-foreground tabular-nums">
-									{formatAt(e.at)}
-								</time>
-								<span>
-									{eventLabel(e)}
-									{e.actor === "human" && (
-										<span className="text-muted-foreground">（人）</span>
-									)}
-								</span>
-							</div>
-						))}
-					</CardContent>
-				</Card>
+									<a
+										className="text-sm font-medium underline-offset-4 hover:underline"
+										href={l.url}
+										target="_blank"
+										rel="noreferrer noopener"
+									>
+										{l.agent_name ?? "業者名未取得"}
+									</a>
+									<span className="text-sm">
+										{formatMan(l.rent)} + {formatMan(l.admin_fee)}
+									</span>
+									<span className="w-full text-xs text-muted-foreground">
+										{formatAt(l.first_seen)} 〜 {formatAt(l.last_seen)}
+										{l.missing_runs > 0 &&
+											`（一覧に無い: ${l.missing_runs} 回）`}
+									</span>
+								</div>
+							))}
+						</CardContent>
+					</Card>
+					<Card>
+						<CardHeader>
+							<CardTitle>履歴</CardTitle>
+						</CardHeader>
+						<CardContent className="divide-y">
+							{events.map((e) => (
+								<div key={e.id} className="flex gap-3 py-2 text-sm">
+									<time className="shrink-0 text-muted-foreground tabular-nums">
+										{formatAt(e.at)}
+									</time>
+									<span>
+										{eventLabel(e)}
+										{e.actor === "human" && (
+											<span className="text-muted-foreground">（人）</span>
+										)}
+									</span>
+								</div>
+							))}
+						</CardContent>
+					</Card>
+				</div>
 			</div>
 
 			{detail && detail.features.length > 0 && (
