@@ -44,7 +44,7 @@ Oct 9, 2026 · @Shuya Izumi
 | fetcher | SUUMO検索一覧の巡回、新規掲載の詳細取得 | TypeScript（fetch + HTMLパーサー） |
 | store | 掲載・部屋・業者・メッセージ・イベントの記録（唯一の正本） | SQLite（bun:sqlite, data/shinkyo.db, WAL） |
 | evaluator | 必須条件の判定と基礎点はコード、注意フラグは Jev、要約・補正は Claude | TypeScript + Jev + `claude -p` |
-| web | 部屋の一覧・詳細・比較、判定と承認とメモの入力 | Hono + JSX + htmx（Tailscale内だけに公開） |
+| web | 部屋の一覧・詳細・比較、判定と承認とメモの入力 | React Router v8（framework mode）+ shadcn/ui。入口は Hono（Tailscale内だけに公開） |
 | mailer | 問い合わせの送信、受信の分類（Jev）と抽出、返信の下書き（Claude） | Gmail API + Jev + `claude -p` |
 | notifier | 新着ダイジェスト、要判断、異常の通知 | ntfy |
 | scheduler | 各ジョブの定期実行と web の常駐 | launchd |
@@ -65,7 +65,7 @@ Oct 9, 2026 · @Shuya Izumi
 - リポジトリは \~/dev/shinkyo のように Desktop・Documents・Downloads の外に置く（macOSのバックグラウンド実行から読めないため）
 - TypeScript（strict）＋ Bun。ツールチェーンは Nix の devShell で固定し、依存は bun.lock で固定
 - 検証：設定のYAML、`claude -p` の出力、Web画面の入力は zod で検証する。`--json-schema` に渡すスキーマも同じ zod の定義から生成する
-- Web画面：Hono + JSX のサーバー描画と htmx。JSのビルド工程は持たない
+- Web画面：React Router v8 の framework mode（SSR）と shadcn/ui（Base UI + Tailwind CSS v4）。Hono を入口にして、権限・CSRF・写真の配信を行い、残りを React Router に渡す。`shinkyo serve` が起動時に `react-router build` する
 - テスト：bun:test。lint と format は Biome
 - LLM：Claude Code の `claude -p`。`--output-format json --json-schema` で構造化出力を受け、結果は `structured_output` から読む（[headless](https://code.claude.com/docs/en/headless.md)）
 - Gmail API（OAuth。スコープは gmail.modify と gmail.compose）
@@ -90,12 +90,13 @@ shinkyo/
 │   └── profile.local.yaml    # 氏名・署名・入居時期など（gitignore）
 ├── templates/mail/           # 定型文 T1〜T6（6章）
 ├── prompts/                  # claude -p 用のプロンプト（スキーマは src の zod 定義から生成）
+├── app/                      # React Router の画面 (routes/, components/。components/ui は shadcn が生成)
 ├── src/
 │   ├── cli.ts                # shinkyo fetch|evaluate|inquire|inbox|plan|status|serve
 │   ├── fetch/suumo.ts        # HttpClient（間隔・上限・robots.txt・停止条件を強制）
 │   ├── store/db.ts
 │   ├── evaluate.ts
-│   ├── web/                  # Hono + JSX の画面
+│   ├── web/                  # Hono の入口 (server.ts)・画面用のクエリ・絞り込み
 │   ├── mail/gmail.ts, classify.ts, compose.ts, send.ts
 │   ├── llm.ts                # claude -p の呼び出しを1か所に集約
 │   └── notify.ts

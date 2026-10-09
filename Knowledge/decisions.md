@@ -94,3 +94,13 @@
 - 条件を変えると一覧だけを差し替える (hx-select)。入力中の値と開いた条件欄を残すため
 - 空の条件は送信前に取り除き、URL には指定した条件だけを残す (共有やブックマークのため)
 - 間取りと駅の選択肢は、見送り以外の部屋から作る
+
+## 2026-10-10 画面を React Router v8 + shadcn/ui に移す
+
+- 決定：画面を React Router の framework mode (SSR) と shadcn/ui (Base UI + Tailwind CSS v4) で作る。入口は Hono のまま残し、権限 (Tailscale-User-Login)・CSRF・写真の配信を Hono で行い、残りを `createRequestHandler` に渡す。バッチ・SQLite・クエリは変えない
+- Why：要件の重心が UI の質に移った。拡大表示・絞り込み・選択ボタンを自前で作り続けるより、品質の保証された shadcn/ui の部品を使う方が安い。比較表・地図・内見計画などブラウザ側の操作が増える見込みもある
+- 見送った案：Bootstrap (見た目が古い)、Tailwind + Basecoat (shadcn の見た目を写しただけで部品と振る舞いが足りない)、HonoX (shadcn/ui が使いにくい)、Next.js (常駐する個人用ツールには重く、Bun と bun:sqlite との組み合わせに癖がある)
+- React Router は最新の v8 を使う (v7 の framework mode の後継)。v8 では loader / action の context が必ず RouterContextProvider になり、`createContext()` のキーで値を渡す
+- 落とし穴1：Hono の入口はソースの app/context.ts を、画面のビルドは同梱のコピーを読むので、`createContext()` のキーが別物になる。キーを globalThis に1つだけ置いて共有する
+- 落とし穴2：tailscale serve 経由だと URL は 127.0.0.1 のまま届き、React Router が Origin ヘッダーとの不一致で action を止める。CSRF で許可した公開 URL から来たものだけ、URL を公開側に直してから渡す
+- テストは HTTP 越しに行うため、`bun run test` で画面をビルドしてから bun test を走らせる

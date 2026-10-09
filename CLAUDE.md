@@ -7,7 +7,8 @@
 - `nix develop` で開発環境に入る
 - `bun run shinkyo <fetch|evaluate|inquire|inbox|plan|status|serve|launchd> [--dry-run]`
 - 本番の導入手順は docs/SETUP.md
-- `bun test` / `bun run typecheck` / `bun run lint`
+- `bun run test` (画面をビルドしてから bun test) / `bun run typecheck` / `bun run lint`
+- 画面は app/ (React Router v8 + shadcn/ui)。`app/components/ui` は shadcn の生成物なので手で直さず、`bunx --bun shadcn@latest add <部品>` で足す
 
 ## 守ること
 
