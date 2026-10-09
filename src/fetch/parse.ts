@@ -29,7 +29,10 @@ export type ListPage = {
 	hitCount: number | null;
 };
 
-export type RoomImage = { url: string; caption: string | null };
+export type RoomImage = {
+	url: string;
+	caption: string | null;
+};
 
 export type RoomDetail = {
 	listingId: string | null;

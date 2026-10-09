@@ -1,12 +1,13 @@
 import type { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { extname, join } from "node:path";
+import { kindOf } from "../images/kinds.ts";
 import type { Clock } from "../time.ts";
 import { isImageUrl, type RoomImage } from "./parse.ts";
 import type { HttpClient } from "./suumo.ts";
 
 export const isFloorPlan = (image: RoomImage): boolean =>
-	image.caption?.includes("間取り") ?? false;
+	kindOf(image) === "floor_plan";
 
 // 説明付きの画像は詳細を取得した掲載にしかないので、説明の多い掲載を写真の出どころにする
 export function pickGallerySource<T extends { images: RoomImage[] }>(

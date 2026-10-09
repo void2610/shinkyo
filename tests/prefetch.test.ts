@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import type { ImageStore } from "../src/fetch/images.ts";
+import { isFloorPlan } from "../src/fetch/images.ts";
 import { parseDetailPage, parseListPage } from "../src/fetch/parse.ts";
 import { FetchStopped } from "../src/fetch/suumo.ts";
 import { prefetchTargets, runPrefetch } from "../src/jobs/prefetch.ts";
@@ -47,4 +48,16 @@ test("保存済みの画像は取り直さず、取得が止められたらそ�
 	const result = await runPrefetch({ db, images, log: () => {} });
 	expect(requested).toEqual([`${base}/002/900000000002/900000000002_co.jpg`]);
 	expect(result).toEqual({ fetched: 0, stopped: "outside_hours" });
+});
+
+test("説明の無い一覧の画像は、ファイル名の末尾 _co で間取り図と見分ける", () => {
+	expect(isFloorPlan({ url: `${base}/001/1/1_co.jpg`, caption: null })).toBe(
+		true,
+	);
+	expect(isFloorPlan({ url: `${base}/001/1/1_go.jpg`, caption: null })).toBe(
+		false,
+	);
+	expect(isFloorPlan({ url: `${base}/001/1/1_co.jpg`, caption: "外観" })).toBe(
+		false,
+	);
 });
