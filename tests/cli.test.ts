@@ -11,6 +11,6 @@ describe("cli", () => {
 	});
 
 	test("未実装のジョブは例外になる", async () => {
-		await expect(main(["evaluate", "--dry-run"])).rejects.toThrow("未実装");
+		await expect(main(["inbox", "--dry-run"])).rejects.toThrow("未実装");
 	});
 });
