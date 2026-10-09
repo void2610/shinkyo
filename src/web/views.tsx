@@ -2,8 +2,16 @@ import bootstrapPackage from "bootstrap/package.json";
 import { raw } from "hono/html";
 import type { Child, FC } from "hono/jsx";
 import htmxPackage from "htmx.org/package.json";
-import { type Judgment, judgments, unitStatuses } from "../domain.ts";
+import {
+	type Judgment,
+	judgments,
+	type UnitFlag,
+	unitFlags,
+	unitStatuses,
+} from "../domain.ts";
 import { isFloorPlan, pickGallerySource } from "../fetch/images.ts";
+import type { RoomImage } from "../fetch/parse.ts";
+import { imageKindLabels, imageKinds, kindOf } from "../images/kinds.ts";
 import {
 	formatAge,
 	formatAt,
@@ -17,6 +25,7 @@ import {
 } from "./format.ts";
 import {
 	type EventRow,
+	type FilterOptions,
 	type ListingRow,
 	type SortKey,
 	sortKeys,
@@ -50,6 +59,14 @@ const showCaption = (modal) => {
 };
 document.addEventListener("shown.bs.modal", (e) => showCaption(e.target));
 document.addEventListener("slid.bs.carousel", (e) => showCaption(e.target.closest(".modal")));
+// 空の条件を URL に残さない (共有やブックマークで読みにくくなるため)
+document.addEventListener("htmx:configRequest", (e) => {
+	const data = e.detail.formData;
+	if (!data) return;
+	const kept = [...data.entries()].filter(([, v]) => v !== "");
+	for (const key of new Set([...data.keys()])) data.delete(key);
+	for (const [k, v] of kept) data.append(k, v);
+});
 </script>`);
 
 export const Layout: FC<{ title: string; access: Role; children: Child }> = ({
@@ -281,73 +298,254 @@ const Select: FC<{
 	</div>
 );
 
+const NumberField: FC<{
+	name: string;
+	label: string;
+	unit: string;
+	value: number | null;
+	step: number;
+}> = ({ name, label, unit, value, step }) => (
+	<div class="col-6 col-sm-3 col-lg-2">
+		<label
+			class="form-label small text-body-secondary mb-0"
+			for={`filter-${name}`}
+		>
+			{label}
+		</label>
+		<div class="input-group input-group-sm">
+			<input
+				class="form-control"
+				type="number"
+				inputmode="decimal"
+				min="0"
+				step={step}
+				name={name}
+				id={`filter-${name}`}
+				value={value ?? ""}
+			/>
+			<span class="input-group-text">{unit}</span>
+		</div>
+	</div>
+);
+
+const TagSelect: FC<{ flag: UnitFlag; filter: UnitFilter }> = ({
+	flag,
+	filter,
+}) => {
+	const value = filter.withFlags.includes(flag)
+		? `+${flag}`
+		: filter.withoutFlags.includes(flag)
+			? `-${flag}`
+			: "";
+	return (
+		<div class="col-6 col-md-4 col-lg-3">
+			<label
+				class="form-label small text-body-secondary mb-0 text-truncate d-block"
+				for={`tag-${flag}`}
+			>
+				{flag}
+			</label>
+			<select class="form-select form-select-sm" name="tag" id={`tag-${flag}`}>
+				{[
+					["", "指定なし"],
+					[`+${flag}`, "あり"],
+					[`-${flag}`, "なし"],
+				].map(([v, text]) => (
+					<option value={v} selected={v === value}>
+						{text}
+					</option>
+				))}
+			</select>
+		</div>
+	);
+};
+
+const advancedCount = (f: UnitFilter): number =>
+	f.layouts.length +
+	(f.station ? 1 : 0) +
+	f.withFlags.length +
+	f.withoutFlags.length;
+
 export const UnitListPage: FC<{
 	units: UnitRow[];
 	filter: UnitFilter;
+	options: FilterOptions;
 	counts: Map<string, number>;
 	access: Role;
-}> = ({ units, filter, counts, access }) => {
+}> = ({ units, filter, options, counts, access }) => {
 	const total = [...counts.values()].reduce((a, b) => a + b, 0);
+	const advanced = advancedCount(filter);
 	return (
 		<Layout title="部屋一覧" access={access}>
+			{/* 一覧だけを差し替え、入力中の値や開いた条件欄はそのまま残す */}
 			<form
-				class="row g-2 align-items-end mb-3"
+				class="card card-body p-2 mb-3"
 				action="/"
 				method="get"
-				hx-trigger="change"
 				hx-get="/"
-				hx-target="body"
+				hx-trigger="change, input delay:500ms"
+				hx-target="#results"
+				hx-select="#results"
+				hx-swap="outerHTML"
 				hx-push-url="true"
 			>
-				<Select
-					wide
-					name="status"
-					label="状態"
-					value={filter.status}
-					options={[
-						["active", `見送り以外 (${total - (counts.get("見送り") ?? 0)})`],
-						["all", `すべて (${total})`],
-						...unitStatuses.map((s): [string, string] => [
-							s,
-							`${s} (${counts.get(s) ?? 0})`,
-						]),
-					]}
-				/>
-				<Select
-					name="judgment"
-					label="判定"
-					value={filter.judgment}
-					options={[
-						["all", "すべて"],
-						["none", "未判定"],
-						...judgments.map((j): [string, string] => [j, j]),
-					]}
-				/>
-				<Select
-					name="sort"
-					label="並び"
-					value={filter.sort}
-					options={Object.entries(sortKeys) as [SortKey, string][]}
-				/>
-				<noscript>
-					<div class="col-auto">
+				<div class="row g-2 align-items-end">
+					<Select
+						wide
+						name="status"
+						label="状態"
+						value={filter.status}
+						options={[
+							["active", `見送り以外 (${total - (counts.get("見送り") ?? 0)})`],
+							["all", `すべて (${total})`],
+							...unitStatuses.map((s): [string, string] => [
+								s,
+								`${s} (${counts.get(s) ?? 0})`,
+							]),
+						]}
+					/>
+					<Select
+						name="judgment"
+						label="判定"
+						value={filter.judgment}
+						options={[
+							["all", "すべて"],
+							["none", "未判定"],
+							...judgments.map((j): [string, string] => [j, j]),
+						]}
+					/>
+					<Select
+						name="sort"
+						label="並び"
+						value={filter.sort}
+						options={Object.entries(sortKeys) as [SortKey, string][]}
+					/>
+				</div>
+				<div class="row g-2 align-items-end mt-0">
+					<NumberField
+						name="max_rent"
+						label="家賃+管理費"
+						unit="万円以下"
+						step={0.5}
+						value={filter.maxRent === null ? null : filter.maxRent / 10000}
+					/>
+					<NumberField
+						name="min_area"
+						label="面積"
+						unit="㎡以上"
+						step={1}
+						value={filter.minArea}
+					/>
+					<NumberField
+						name="max_walk"
+						label="駅徒歩"
+						unit="分以内"
+						step={1}
+						value={filter.maxWalk}
+					/>
+					<NumberField
+						name="max_age"
+						label="築年数"
+						unit="年以内"
+						step={1}
+						value={filter.maxAge}
+					/>
+				</div>
+				<div class="d-flex align-items-center gap-3 mt-2">
+					<button
+						class="btn btn-sm btn-outline-secondary"
+						type="button"
+						data-bs-toggle="collapse"
+						data-bs-target="#more-filters"
+						aria-expanded={advanced > 0 ? "true" : "false"}
+						aria-controls="more-filters"
+					>
+						条件を追加
+						{advanced > 0 && (
+							<span class="badge text-bg-primary ms-1">{advanced}</span>
+						)}
+					</button>
+					<a class="small" href="/">
+						条件をクリア
+					</a>
+					<noscript>
 						<button class="btn btn-sm btn-primary" type="submit">
 							絞り込む
 						</button>
-					</div>
-				</noscript>
-			</form>
-			{units.length === 0 ? (
-				<p class="text-center text-body-secondary py-5">
-					該当する部屋はありません。
-				</p>
-			) : (
-				<div class="row row-cols-1 row-cols-lg-2 g-3">
-					{units.map((u) => (
-						<UnitCard unit={u} access={access} />
-					))}
+					</noscript>
 				</div>
-			)}
+				<div class={`collapse ${advanced > 0 ? "show" : ""}`} id="more-filters">
+					<div class="pt-3">
+						<div class="small text-body-secondary mb-1">間取り</div>
+						<div class="d-flex flex-wrap gap-1 mb-3">
+							{options.layouts.map((layout) => (
+								<>
+									<input
+										type="checkbox"
+										class="btn-check"
+										name="layout"
+										value={layout}
+										id={`layout-${layout}`}
+										autocomplete="off"
+										checked={filter.layouts.includes(layout)}
+									/>
+									<label
+										class="btn btn-sm btn-outline-primary"
+										for={`layout-${layout}`}
+									>
+										{layout}
+									</label>
+								</>
+							))}
+						</div>
+						<div class="row g-2 mb-3">
+							<div class="col-12 col-sm-6 col-lg-3">
+								<label
+									class="form-label small text-body-secondary mb-0"
+									for="filter-station"
+								>
+									最寄駅
+								</label>
+								<select
+									class="form-select form-select-sm"
+									name="station"
+									id="filter-station"
+								>
+									<option value="">指定なし</option>
+									{options.stations.map((station) => (
+										<option
+											value={station}
+											selected={station === filter.station}
+										>
+											{station}
+										</option>
+									))}
+								</select>
+							</div>
+						</div>
+						<div class="small text-body-secondary mb-1">タグ</div>
+						<div class="row g-2">
+							{unitFlags.map((flag) => (
+								<TagSelect flag={flag} filter={filter} />
+							))}
+						</div>
+					</div>
+				</div>
+			</form>
+			<div id="results">
+				<p class="small text-body-secondary mb-2">{units.length} 件</p>
+				{units.length === 0 ? (
+					<p class="text-center text-body-secondary py-5">
+						該当する部屋はありません。
+					</p>
+				) : (
+					<div class="row row-cols-1 row-cols-lg-2 g-3">
+						{units.map((u) => (
+							<UnitCard unit={u} access={access} />
+						))}
+					</div>
+				)}
+			</div>
 		</Layout>
 	);
 };
@@ -386,50 +584,133 @@ const eventLabel = (e: EventRow): string => {
 const GALLERY_MODAL = "gallery-modal";
 const GALLERY_CAROUSEL = "gallery-carousel";
 
-const Gallery: FC<{ listings: ListingRow[] }> = ({ listings }) => {
+type Photo = RoomImage & { index: number; slide: number };
+
+// 間取り図を先頭に並べた順が、拡大表示で送る順になる
+function photosOf(
+	listings: ListingRow[],
+): { listingId: string; photos: Photo[] } | null {
 	const source = pickGallerySource(listings);
 	if (!source || source.images.length === 0) return null;
 	const images = source.images.map((image, index) => ({ ...image, index }));
-	// 比較で一番見る間取り図を先頭に出す
-	const ordered = [
-		...images.filter(isFloorPlan),
-		...images.filter((i) => !isFloorPlan(i)),
-	];
+	const ordered = imageKinds.flatMap((kind) =>
+		images.filter((i) => kindOf(i) === kind),
+	);
+	return {
+		listingId: source.listing_id,
+		photos: ordered.map((p, slide) => ({ ...p, slide })),
+	};
+}
+
+const ZoomButton: FC<{ photo: Photo; class: string; children: Child }> = ({
+	photo,
+	class: className,
+	children,
+}) => (
+	<button
+		type="button"
+		class={`border-0 p-0 ${className}`}
+		data-bs-toggle="modal"
+		data-bs-target={`#${GALLERY_MODAL}`}
+		data-slide={photo.slide}
+		aria-label={`${photo.caption ?? "写真"}を拡大`}
+	>
+		{children}
+	</button>
+);
+
+// 間取り図は比べるときに必ず見るので、切り取らずに全体を常に出す
+const FloorPlans: FC<{ listingId: string; photos: Photo[] }> = ({
+	listingId,
+	photos,
+}) => {
+	const plans = photos.filter(isFloorPlan);
+	return (
+		<section class="card h-100">
+			<div class="card-header">間取り図</div>
+			<div class="card-body d-flex flex-column gap-2 justify-content-center">
+				{plans.length === 0 ? (
+					<p class="text-body-secondary text-center mb-0">
+						間取り図はまだありません
+					</p>
+				) : (
+					plans.map((plan) => (
+						<ZoomButton photo={plan} class="d-block w-100 bg-white rounded">
+							<img
+								class="d-block w-100 floor-plan"
+								src={imagePath(listingId, plan.index)}
+								alt={plan.caption ?? "間取り図"}
+								decoding="async"
+							/>
+						</ZoomButton>
+					))
+				)}
+			</div>
+		</section>
+	);
+};
+
+const PhotoGrid: FC<{
+	listingId: string;
+	photos: Photo[];
+	small?: boolean;
+}> = ({ listingId, photos, small }) => (
+	<div
+		class={`row g-2 ${small ? "row-cols-3 row-cols-sm-4 row-cols-md-6" : "row-cols-2 row-cols-sm-3 row-cols-md-4"}`}
+	>
+		{photos.map((image) => (
+			<div class="col">
+				<figure class="figure w-100 mb-0">
+					<ZoomButton
+						photo={image}
+						class="ratio ratio-4x3 d-block w-100 bg-body-secondary rounded overflow-hidden"
+					>
+						<img
+							class="object-fit-cover"
+							src={imagePath(listingId, image.index)}
+							alt={image.caption ?? "物件の写真"}
+							loading="lazy"
+							decoding="async"
+						/>
+					</ZoomButton>
+					{image.caption && (
+						<figcaption
+							class={`figure-caption text-truncate mt-1 ${small ? "small" : ""}`}
+							title={image.caption}
+						>
+							{image.caption}
+						</figcaption>
+					)}
+				</figure>
+			</div>
+		))}
+	</div>
+);
+
+// 間取り図は別枠に出すので、ここでは室内・建物・周辺を分けて並べる。周辺施設は参考程度なので小さくする
+const galleryKinds = ["room", "building", "other", "surroundings"] as const;
+
+const Gallery: FC<{ listingId: string; photos: Photo[] }> = ({
+	listingId,
+	photos,
+}) => {
 	return (
 		<section class="mb-4">
-			<h2 class="h6 text-body-secondary">写真 ({images.length})</h2>
-			<div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-2">
-				{ordered.map((image, slide) => (
-					<div class="col">
-						<figure class="figure w-100 mb-0">
-							<button
-								type="button"
-								class="ratio ratio-4x3 d-block w-100 border-0 p-0 bg-body-secondary rounded overflow-hidden"
-								data-bs-toggle="modal"
-								data-bs-target={`#${GALLERY_MODAL}`}
-								data-slide={slide}
-								aria-label={`${image.caption ?? "写真"}を拡大`}
-							>
-								<img
-									class="object-fit-cover"
-									src={imagePath(source.listing_id, image.index)}
-									alt={image.caption ?? "物件の写真"}
-									loading="lazy"
-									decoding="async"
-								/>
-							</button>
-							{image.caption && (
-								<figcaption
-									class="figure-caption text-truncate mt-1"
-									title={image.caption}
-								>
-									{image.caption}
-								</figcaption>
-							)}
-						</figure>
+			{galleryKinds.map((kind) => {
+				const group = photos.filter((p) => kindOf(p) === kind);
+				return group.length === 0 ? null : (
+					<div class="mb-3">
+						<h2 class="h6 text-body-secondary">
+							{imageKindLabels[kind]} ({group.length})
+						</h2>
+						<PhotoGrid
+							listingId={listingId}
+							photos={group}
+							small={kind === "surroundings"}
+						/>
 					</div>
-				))}
-			</div>
+				);
+			})}
 			<div
 				class="modal fade"
 				role="dialog"
@@ -457,14 +738,14 @@ const Gallery: FC<{ listings: ListingRow[] }> = ({ listings }) => {
 								data-bs-touch="true"
 							>
 								<div class="carousel-inner">
-									{ordered.map((image, slide) => (
+									{photos.map((image) => (
 										<div
-											class={`carousel-item ${slide === 0 ? "active" : ""}`}
+											class={`carousel-item ${image.slide === 0 ? "active" : ""}`}
 											data-caption={image.caption ?? ""}
 										>
 											<img
 												class="d-block mx-auto gallery-full"
-												src={imagePath(source.listing_id, image.index)}
+												src={imagePath(listingId, image.index)}
 												alt={image.caption ?? "物件の写真"}
 												loading="lazy"
 												decoding="async"
@@ -542,6 +823,7 @@ export const UnitDetailPage: FC<{
 }> = ({ unit, listings, events, access }) => {
 	const detail = listings.find((l) => l.features.length > 0) ?? listings[0];
 	const memoPath = `${unitPath(unit.unit_key)}/memo`;
+	const gallery = photosOf(listings);
 	return (
 		<Layout title={unitName(unit)} access={access}>
 			<nav aria-label="breadcrumb">
@@ -554,7 +836,7 @@ export const UnitDetailPage: FC<{
 					</li>
 				</ol>
 			</nav>
-			<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+			<div class="d-flex flex-wrap align-items-center gap-2 mb-1">
 				<h1 class="h4 mb-0 unit-name">{unitName(unit)}</h1>
 				<StatusBadge status={unit.status} />
 				{unit.score !== null && (
@@ -562,6 +844,17 @@ export const UnitDetailPage: FC<{
 						{Math.round(unit.score)}点
 					</span>
 				)}
+			</div>
+			<div class="d-flex flex-wrap align-items-baseline column-gap-3 mb-2">
+				<span class="fs-2 fw-bold lh-sm">{formatMan(unit.rent)}</span>
+				<span class="text-body-secondary">
+					管理費 {formatMan(unit.admin_fee)}・敷{" "}
+					{formatMonths(unit.deposit, unit.rent)}・礼{" "}
+					{formatMonths(unit.key_money, unit.rent)}
+				</span>
+				<span class="text-body-secondary">
+					{unit.layout}・{unit.area_m2}㎡
+				</span>
 			</div>
 			<div class="mb-2">
 				<Flags flags={unit.flags} />
@@ -576,10 +869,14 @@ export const UnitDetailPage: FC<{
 			</div>
 			{unit.summary && <p class="lead fs-6 summary">{unit.summary}</p>}
 
-			<Gallery listings={listings} />
-
 			<div class="row g-3 mb-4">
-				<div class="col-lg-7">
+				<div class="col-lg-6">
+					<FloorPlans
+						listingId={gallery?.listingId ?? ""}
+						photos={gallery?.photos ?? []}
+					/>
+				</div>
+				<div class="col-lg-6">
 					<section class="card h-100">
 						<div class="card-header">概要</div>
 						<div class="card-body">
@@ -629,7 +926,14 @@ export const UnitDetailPage: FC<{
 						</div>
 					</section>
 				</div>
-				<div class="col-lg-5">
+			</div>
+
+			{gallery && (
+				<Gallery listingId={gallery.listingId} photos={gallery.photos} />
+			)}
+
+			<div class="row g-3 mb-4">
+				<div class="col-12">
 					<section class="card h-100">
 						<div class="card-header">評価メモ</div>
 						<div class="card-body">

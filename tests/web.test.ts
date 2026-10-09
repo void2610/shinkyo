@@ -194,13 +194,32 @@ describe("画面", () => {
 		expect(html).toContain('src="/images/900000000001/0"');
 	});
 
-	test("詳細ページは説明付きの画像を、間取り図を先頭にして並べる", async () => {
+	test("間取り図は写真とは別の枠に、切り取らずに常に出す", async () => {
 		const html = await (await app.request(unitPath())).text();
-		expect(html).toContain("写真 (3)");
-		expect(html.indexOf("間取り図")).toBeLessThan(
-			html.indexOf("居室・リビング"),
+		const plan = html.slice(
+			html.indexOf(">間取り図</div>"),
+			html.indexOf(">概要</div>"),
 		);
-		expect(html).toContain('src="/images/900000000002/1"');
+		expect(plan).toContain(
+			'class="d-block w-100 floor-plan" src="/images/900000000002/1"',
+		);
+		expect(plan).not.toContain('loading="lazy"');
+		const grid = html.slice(
+			html.indexOf("室内・設備 ("),
+			html.indexOf('class="modal fade"'),
+		);
+		expect(grid).toContain("室内・設備 (1)");
+		expect(grid).toContain("建物・共用部 (1)");
+		expect(grid).not.toContain('src="/images/900000000002/1"');
+	});
+
+	test("拡大表示では間取り図から順に、すべての写真を送れる", async () => {
+		const html = await (await app.request(unitPath())).text();
+		const carousel = html.slice(html.indexOf('class="carousel-inner"'));
+		expect(carousel.match(/carousel-item/g)).toHaveLength(3);
+		expect(carousel.indexOf('data-caption="間取り図"')).toBeLessThan(
+			carousel.indexOf('data-caption="居室・リビング"'),
+		);
 	});
 
 	test("画像は閲覧者にも返し、掲載に無い番号は 404", async () => {
@@ -217,5 +236,14 @@ describe("画面", () => {
 		expect(html).toContain("carousel slide");
 		expect(html).not.toContain('target="_blank" rel="noreferrer"><img');
 		expect(html).toContain('data-slide="0"');
+	});
+
+	test("見出しのすぐ下に家賃を大きく出す", async () => {
+		const html = await (await app.request(unitPath())).text();
+		const head = html.slice(
+			html.indexOf("<h1"),
+			html.indexOf(">間取り図</div>"),
+		);
+		expect(head).toContain('<span class="fs-2 fw-bold lh-sm">12.5万円</span>');
 	});
 });
