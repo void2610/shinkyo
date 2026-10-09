@@ -7,3 +7,7 @@ people: 1
 job_income: ""              # 職業・年収帯の書き方
 viewing_windows: []         # 内見できる曜日と時間帯
 call_window: ""             # 審査の電話に出られる時間帯
+ntfy_topic: ""              # 通知先の ntfy トピック（空なら標準出力に出す）
+web:
+  owner_logins: []          # 操作を許す Tailscale のログイン名。ほかの人は閲覧専用になる
+  allowed_origins: []       # tailscale serve で公開する URL（例: https://m1.example.ts.net）
