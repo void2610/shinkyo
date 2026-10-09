@@ -231,14 +231,14 @@ SQLiteが唯一の正本で、Web画面はそれを直接読み書きする。�
 - 出力は `--json-schema` で受け、`structured_output` を検証してから使う。不一致は1回だけ再試行し、だめなら「人の判断が要る」として通知し、送信はしない
 
 ```bash
-claude --bare -p \
+claude -p \
   --output-format json \
   --json-schema "$SCHEMA" \
   --append-system-prompt-file prompts/classify.md \
   --permission-mode dontAsk < input.json
 ```
 
-`--bare` は CLAUDE.md・フック・MCP・スキルを読まないので再現性が高い。ただしサブスクのログインではなく ANTHROPIC\_API\_KEY が要る（[headless](https://code.claude.com/docs/en/headless.md)）。どちらにするかは10章で決める。
+サブスクのログインで `claude -p` を呼ぶ（2026-10-10 決定）。`--bare` は API キーが要るので使わない。\~/.claude のフックや設定も読み込まれるため、作業ディレクトリを空の一時ディレクトリにして影響を抑える（[headless](https://code.claude.com/docs/en/headless.md)）。
 
 ### J1 取得（shinkyo fetch）
 
@@ -508,7 +508,7 @@ M1 に入る前に、次の値を決めて config/ に入れる。
 - [ ] 内見できる曜日と時間帯（内見日時の自動確定に使う）
 - [ ] 審査の電話に出られる時間帯
 - [ ] 物件探し用の Gmail（新しいアカウントか、既存アカウントの +エイリアスか）
-- [ ] LLM の呼び出し方：`claude --bare -p` と API キー（再現性が高い、従量課金）か、サブスクのログインで `claude -p`（\~/.claude のフックや設定も読み込まれる）か
+- [x] LLM の呼び出し方：サブスクのログインで `claude -p`
 - [ ] ハブ業者（初週の比較で決める）
 
 ## 付録A. CLAUDE.md
