@@ -1,9 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import type { ImageStore } from "../src/fetch/images.ts";
-import { isFloorPlan } from "../src/fetch/images.ts";
 import { parseDetailPage, parseListPage } from "../src/fetch/parse.ts";
 import { FetchStopped } from "../src/fetch/suumo.ts";
+import { isFloorPlan } from "../src/images/kinds.ts";
 import { prefetchTargets, runPrefetch } from "../src/jobs/prefetch.ts";
 import { applyDetail, upsertListing } from "../src/store/listings.ts";
 import { fixture, MONDAY_10_JST, memoryDb } from "./helpers.ts";

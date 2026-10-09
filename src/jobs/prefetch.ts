@@ -1,11 +1,8 @@
 import type { Database } from "bun:sqlite";
-import {
-	type ImageStore,
-	isFloorPlan,
-	pickGallerySource,
-} from "../fetch/images.ts";
+import type { ImageStore } from "../fetch/images.ts";
 import type { RoomImage } from "../fetch/parse.ts";
 import { FetchStopped } from "../fetch/suumo.ts";
+import { isFloorPlan, pickGallerySource } from "../images/kinds.ts";
 
 export type PrefetchDeps = {
 	db: Database;
