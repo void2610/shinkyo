@@ -43,9 +43,9 @@ Oct 9, 2026 · @Shuya Izumi
 | --- | --- | --- |
 | fetcher | SUUMO検索一覧の巡回、新規掲載の詳細取得 | TypeScript（fetch + HTMLパーサー） |
 | store | 掲載・部屋・業者・メッセージ・イベントの記録（唯一の正本） | SQLite（bun:sqlite, data/shinkyo.db, WAL） |
-| evaluator | 必須条件の判定と基礎点はコード、注意フラグ・要約・補正はClaude | TypeScript + `claude -p` |
+| evaluator | 必須条件の判定と基礎点はコード、注意フラグは Jev、要約・補正は Claude | TypeScript + Jev + `claude -p` |
 | web | 部屋の一覧・詳細・比較、判定と承認とメモの入力 | Hono + JSX + htmx（Tailscale内だけに公開） |
-| mailer | 問い合わせの送信、受信の分類と抽出、返信の下書き | Gmail API + `claude -p` |
+| mailer | 問い合わせの送信、受信の分類（Jev）と抽出、返信の下書き（Claude） | Gmail API + Jev + `claude -p` |
 | notifier | 新着ダイジェスト、要判断、異常の通知 | ntfy |
 | scheduler | 各ジョブの定期実行と web の常駐 | launchd |
 | skills | 対話で使う補助（状況確認、比較、電話メモ、パーサー修理） | Claude Code スキル |
@@ -138,6 +138,10 @@ fetch:
   max_pages_per_search: 3
   daily_request_cap: 150
   stop_on_status: [403, 429, 503]
+images:                             # 画面で見たときに取得してキャッシュする物件写真
+  request_gap_sec: 1
+  jitter_sec: 0.5
+  daily_cap: 1000
 mail:
   send_hours: "09:00-21:00"
   send_slots: ["10:00", "15:00"]    # J3 のまとめ送信の時刻
@@ -246,6 +250,7 @@ claude -p \
 2. robots.txt を1日1回取得し、searches.yaml の各URLが許可されているか確認する
 3. 一覧を最大 max\_pages\_per\_search ページ取得する。間隔は request\_gap\_sec＋0〜jitter\_sec 秒
 4. 掲載を解析して upsert する。新しい listing\_id だけ詳細ページを1回取得し、raw HTML を data/raw/ に7日間保存する
+   - 物件写真は URL だけを保存し、画面で表示されたときに取得して data/images/ に残す（ページとは別の間隔と上限。取得時間帯では止めない）
 5. 一覧に2回連続で無い掲載に「掲載終了の可能性」、家賃の低下に「値下げ」を付ける
 6. stop\_on\_status の応答か CAPTCHA の兆候で、その日の取得を止めて通知する
 7. 一覧が200なのに0件しか解析できなければ、パーサー破損として通知する
@@ -256,7 +261,7 @@ claude -p \
 
 1. 必須条件（criteria.hard）をコードで判定し、外れたら「見送り（自動）」にする
 2. 基礎点を weights で計算する。家賃が同じ駅・間取りの収集データの中央値より15%以上安ければ「相場より安い」フラグ
-3. 通過した部屋を Claude に渡し、注意フラグ・一行要約・±10点の補正と理由を受け取る
+3. 通過した部屋の注意フラグを Jev で判定し（フラグごとの yes/no、確率 0.7 以上を採用）、Claude から一行要約・±10点の補正と理由を受け取る。Jev が使えないときは注意フラグも Claude が選ぶ
 4. 評価結果を SQLite に保存する（Web画面にそのまま出る）
 5. notify\_min\_score（criteria.yaml）以上の上位5件を ntfy でダイジェスト通知する（1日最大3回にまとめる）
 
@@ -275,7 +280,7 @@ claude -p \
 ### J4 受信処理（shinkyo inbox）
 
 1. Gmail のラベル shinkyo/agent（agents.yaml のアドレス・ドメインで振り分け）の未処理メッセージを取得する
-2. Claude で分類と抽出を行う。出力は category、対象の部屋（URLや物件名）、空室の有無、内見候補日時、初期費用の内訳、必要書類、電話・LINEへの誘導の有無、人の判断が要るか（理由つき）
+2. カテゴリを Jev の choice で分類し、確信度が低いものだけ Claude で再判定する（前例 ../gmail-triage）。抽出は Claude で行う。出力は category、対象の部屋（URLや物件名）、空室の有無、内見候補日時、初期費用の内訳、必要書類、電話・LINEへの誘導の有無、人の判断が要るか（理由つき）
 3. SQLite を更新し、4章の遷移に従って状態を進める
 4. 下の表のとおり返信する
 5. 送信から24時間返信がなければ T5 を作る（火・水は数えない。ハブ宛ては自動、それ以外は下書き）

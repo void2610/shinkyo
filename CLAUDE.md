@@ -5,7 +5,8 @@
 ## コマンド
 
 - `nix develop` で開発環境に入る
-- `bun run shinkyo <fetch|evaluate|inquire|inbox|plan|status|serve> [--dry-run]`
+- `bun run shinkyo <fetch|evaluate|inquire|inbox|plan|status|serve|launchd> [--dry-run]`
+- 本番の導入手順は docs/SETUP.md
 - `bun test` / `bun run typecheck` / `bun run lint`
 
 ## 守ること
