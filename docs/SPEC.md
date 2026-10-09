@@ -142,7 +142,7 @@ fetch:
 images:                             # 物件写真。候補のサムネイルと間取り図は定期実行で先に取得し、残りは画面で見たときに取得する
   request_gap_sec: 0.2              # ブラウザで SUUMO を見るときの同時読み込みより控えめ
   jitter_sec: 0.1
-  daily_cap: 1000
+  daily_cap: 5000
 mail:
   send_hours: "09:00-21:00"
   send_slots: ["10:00", "15:00"]    # J3 のまとめ送信の時刻
