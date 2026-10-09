@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { Judgment, Station, UnitStatus } from "../domain.ts";
+import type { RoomImage } from "../fetch/parse.ts";
 import { recordEvent } from "../store/listings.ts";
 
 export const sortKeys = {
@@ -45,6 +46,7 @@ export type UnitRow = {
 	orientation: string | null;
 	first_seen: string;
 	listing_count: number;
+	images: RoomImage[];
 };
 
 export type ListingRow = {
@@ -63,6 +65,7 @@ export type ListingRow = {
 	guarantor: string | null;
 	building_floors: string | null;
 	property_type: string | null;
+	images: RoomImage[];
 };
 
 export type EventRow = {
@@ -75,7 +78,11 @@ export type EventRow = {
 	detail: unknown;
 };
 
-type RawUnitRow = Omit<UnitRow, "flags" | "stations" | "apply_approved"> & {
+type RawUnitRow = Omit<
+	UnitRow,
+	"flags" | "stations" | "apply_approved" | "images"
+> & {
+	images: string;
 	flags: string;
 	stations: string;
 	apply_approved: number;
@@ -99,15 +106,23 @@ const unitSelect = `
 	SELECT u.unit_key, u.status, u.judgment, u.base_score + COALESCE(u.adj_score, 0) AS score, u.flags, u.summary, u.memo,
 		u.apply_approved, u.viewing_at, u.next_action, u.updated_at,
 		r.listing_id, r.url, r.rent, r.admin_fee, r.deposit, r.key_money, r.layout, r.area_m2, r.built_age, r.built_ym,
-		r.floor, r.building_name, r.address, r.stations, r.orientation, r.first_seen, r.listing_count,
+		r.floor, r.building_name, r.address, r.stations, r.orientation, r.first_seen, r.listing_count, r.images,
 		(SELECT MIN(json_extract(value, '$.walkMin')) FROM json_each(r.stations)) AS min_walk
 	FROM units u JOIN ranked r ON r.unit_key = u.unit_key AND r.rn = 1`;
 
 const toUnit = (raw: RawUnitRow & { min_walk?: number | null }): UnitRow => {
-	const { flags, stations, apply_approved, min_walk: _minWalk, ...rest } = raw;
+	const {
+		flags,
+		stations,
+		apply_approved,
+		images,
+		min_walk: _minWalk,
+		...rest
+	} = raw;
 	return {
 		...rest,
 		flags: JSON.parse(flags),
+		images: JSON.parse(images),
 		stations: JSON.parse(stations),
 		apply_approved: apply_approved === 1,
 	};
@@ -156,15 +171,22 @@ export function getUnit(db: Database, key: string): UnitRow | null {
 export function getListings(db: Database, key: string): ListingRow[] {
 	return db
 		.query<
-			Omit<ListingRow, "features"> & { features: string | null },
+			Omit<ListingRow, "features" | "images"> & {
+				features: string | null;
+				images: string;
+			},
 			[string]
 		>(
 			`SELECT listing_id, url, agent_name, rent, admin_fee, deposit, key_money, first_seen, last_seen, missing_runs,
-				features, other_costs, guarantor, building_floors, property_type
+				features, other_costs, guarantor, building_floors, property_type, images
 			FROM listings WHERE unit_key = ? ORDER BY rent + admin_fee, last_seen DESC`,
 		)
 		.all(key)
-		.map((l) => ({ ...l, features: l.features ? JSON.parse(l.features) : [] }));
+		.map((l) => ({
+			...l,
+			features: l.features ? JSON.parse(l.features) : [],
+			images: JSON.parse(l.images),
+		}));
 }
 
 export function getEvents(db: Database, key: string): EventRow[] {
@@ -246,4 +268,18 @@ export function approveApplication(
 		});
 		return "ok";
 	})();
+}
+
+export function getImageUrl(
+	db: Database,
+	listingId: string,
+	index: number,
+): string | null {
+	const row = db
+		.query<{ images: string }, [string]>(
+			"SELECT images FROM listings WHERE listing_id = ?",
+		)
+		.get(listingId);
+	if (!row) return null;
+	return (JSON.parse(row.images) as RoomImage[])[index]?.url ?? null;
 }

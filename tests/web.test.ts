@@ -1,12 +1,15 @@
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, test } from "bun:test";
-import { parseListPage } from "../src/fetch/parse.ts";
-import { upsertListing } from "../src/store/listings.ts";
+import { parseDetailPage, parseListPage } from "../src/fetch/parse.ts";
+import { applyDetail, upsertListing } from "../src/store/listings.ts";
 import { createApp } from "../src/web/app.tsx";
 import { FakeClock, fixture, MONDAY_10_JST, memoryDb } from "./helpers.ts";
 
 const OWNER = "owner@example.com";
 const page = parseListPage(await fixture("list_p1.html"));
+const detail = parseDetailPage(await fixture("detail.html"));
+const imageFile = `${import.meta.dir}/fixtures/suumo/detail.html`;
+const requested: string[] = [];
 
 let db: Database;
 let app: ReturnType<typeof createApp>;
@@ -16,6 +19,8 @@ beforeEach(() => {
 	db = memoryDb();
 	const at = MONDAY_10_JST.toISOString();
 	for (const room of page.rooms) upsertListing(db, room, "test", at);
+	applyDetail(db, "900000000002", detail, "", at);
+	requested.length = 0;
 	key =
 		db
 			.query<{ unit_key: string }, []>(
@@ -25,6 +30,12 @@ beforeEach(() => {
 	app = createApp({
 		db,
 		clock: new FakeClock(MONDAY_10_JST).read,
+		images: {
+			get: async (url) => {
+				requested.push(url);
+				return { path: imageFile, contentType: "image/jpeg" };
+			},
+		},
 		ownerLogins: [OWNER],
 		allowedOrigins: ["https://m1.example.ts.net"],
 		devOwner: false,
@@ -176,5 +187,27 @@ describe("画面", () => {
 		const res = await app.request("/static/htmx.min.js");
 		expect(res.status).toBe(200);
 		expect(res.headers.get("content-type")).toContain("javascript");
+	});
+
+	test("一覧のカードに代表の掲載の1枚目を出す", async () => {
+		const html = await (await app.request("/")).text();
+		expect(html).toContain('src="/images/900000000001/0"');
+	});
+
+	test("詳細ページは説明付きの画像を、間取り図を先頭にして並べる", async () => {
+		const html = await (await app.request(unitPath())).text();
+		expect(html).toContain("写真 (3)");
+		expect(html.indexOf("間取り図")).toBeLessThan(
+			html.indexOf("居室・リビング"),
+		);
+		expect(html).toContain('src="/images/900000000002/1"');
+	});
+
+	test("画像は閲覧者にも返し、掲載に無い番号は 404", async () => {
+		const res = await app.request("/images/900000000002/1");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-type")).toBe("image/jpeg");
+		expect(requested).toEqual([detail.images[1]?.url ?? ""]);
+		expect((await app.request("/images/900000000002/9")).status).toBe(404);
 	});
 });

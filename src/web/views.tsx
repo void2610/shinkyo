@@ -1,4 +1,7 @@
+import bootstrapPackage from "bootstrap/package.json";
+import { raw } from "hono/html";
 import type { Child, FC } from "hono/jsx";
+import htmxPackage from "htmx.org/package.json";
 import { type Judgment, judgments, unitStatuses } from "../domain.ts";
 import {
 	formatAge,
@@ -7,6 +10,7 @@ import {
 	formatMan,
 	formatMonths,
 	formatStation,
+	imagePath,
 	unitName,
 	unitPath,
 } from "./format.ts";
@@ -19,7 +23,17 @@ import {
 	type UnitRow,
 } from "./queries.ts";
 
+// 更新した CSS をすぐ反映させるため、内容のハッシュを URL に付けて長くキャッシュさせる
+const cssVersion = Bun.hash(
+	await Bun.file(new URL("./style.css", import.meta.url)).text(),
+).toString(36);
+
 export type Role = "owner" | "viewer";
+
+// 描画前に配色を決めないと、ダークモードで一瞬白く光る
+const themeScript = raw(
+	`<script>document.documentElement.dataset.bsTheme=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"</script>`,
+);
 
 export const Layout: FC<{ title: string; access: Role; children: Child }> = ({
 	title,
@@ -32,17 +46,26 @@ export const Layout: FC<{ title: string; access: Role; children: Child }> = ({
 			<meta name="viewport" content="width=device-width, initial-scale=1" />
 			<meta name="robots" content="noindex" />
 			<title>{title} | shinkyo</title>
-			<link rel="stylesheet" href="/static/style.css" />
-			<script src="/static/htmx.min.js" defer />
+			{themeScript}
+			<link
+				rel="stylesheet"
+				href={`/static/bootstrap.min.css?v=${bootstrapPackage.version}`}
+			/>
+			<link rel="stylesheet" href={`/static/style.css?v=${cssVersion}`} />
+			<script src={`/static/htmx.min.js?v=${htmxPackage.version}`} defer />
 		</head>
 		<body hx-boost="true">
-			<header class="site">
-				<a class="brand" href="/">
-					shinkyo
-				</a>
-				{access === "viewer" && <span class="badge viewer">閲覧専用</span>}
-			</header>
-			<main>{children}</main>
+			<nav class="navbar border-bottom bg-body-tertiary">
+				<div class="container-xl">
+					<a class="navbar-brand fw-bold" href="/">
+						shinkyo
+					</a>
+					{access === "viewer" && (
+						<span class="badge rounded-pill text-bg-secondary">閲覧専用</span>
+					)}
+				</div>
+			</nav>
+			<main class="container-xl py-3">{children}</main>
 		</body>
 	</html>
 );
@@ -55,19 +78,21 @@ export const JudgmentControl: FC<{
 	const id = `judgment-${Bun.hash(unitKey).toString(36)}`;
 	if (access === "viewer") {
 		return (
-			<div class="judgment" id={id}>
-				<span class={`judgment-value ${judgment ? "" : "empty"}`}>
+			<div id={id}>
+				<span
+					class={`badge ${judgment ? "text-bg-primary fs-6" : "text-bg-light border"}`}
+				>
 					{judgment ?? "未判定"}
 				</span>
 			</div>
 		);
 	}
 	return (
-		<div class="judgment" id={id}>
+		<fieldset class="btn-group" aria-label="判定" id={id}>
 			{judgments.map((j) => (
 				<button
 					type="button"
-					class={`judge ${judgment === j ? "selected" : ""}`}
+					class={`btn judge ${judgment === j ? "btn-primary" : "btn-outline-primary"}`}
 					aria-pressed={judgment === j ? "true" : "false"}
 					hx-post={`${unitPath(unitKey)}/judgment`}
 					hx-vals={JSON.stringify({ judgment: judgment === j ? "" : j })}
@@ -77,67 +102,132 @@ export const JudgmentControl: FC<{
 					{j}
 				</button>
 			))}
-		</div>
+		</fieldset>
 	);
 };
 
+const goodFlags = new Set(["値下げ", "相場より安い"]);
+
 const Flags: FC<{ flags: string[] }> = ({ flags }) =>
 	flags.length === 0 ? null : (
-		<ul class="flags">
+		<div class="d-flex flex-wrap gap-1">
 			{flags.map((f) => (
-				<li class={`flag ${f === "値下げ" ? "good" : "warn"}`}>{f}</li>
+				<span
+					class={`badge ${goodFlags.has(f) ? "text-bg-success" : "text-bg-warning"}`}
+				>
+					{f}
+				</span>
 			))}
-		</ul>
+		</div>
 	);
 
+const statusColor = (status: string): string =>
+	status === "見送り"
+		? "text-bg-secondary"
+		: status === "確定"
+			? "text-bg-success"
+			: "text-bg-info";
+
 const StatusBadge: FC<{ status: string }> = ({ status }) => (
-	<span class={`status s-${status}`}>{status}</span>
+	<span class={`badge ${statusColor(status)}`}>{status}</span>
+);
+
+const Thumbnail: FC<{ unit: UnitRow }> = ({ unit }) => (
+	<a
+		class="ratio ratio-4x3 d-block bg-body-secondary rounded overflow-hidden"
+		href={unitPath(unit.unit_key)}
+	>
+		{unit.images.length > 0 ? (
+			<img
+				class="object-fit-cover"
+				src={imagePath(unit.listing_id, 0)}
+				alt={unitName(unit)}
+				loading="lazy"
+				decoding="async"
+			/>
+		) : (
+			<span class="d-flex align-items-center justify-content-center text-body-secondary small">
+				画像なし
+			</span>
+		)}
+	</a>
 );
 
 const UnitCard: FC<{ unit: UnitRow; access: Role }> = ({ unit, access }) => {
 	const [first, ...restStations] = unit.stations;
 	return (
-		<li class="card">
-			<div class="card-head">
-				<a class="card-title" href={unitPath(unit.unit_key)}>
-					{unitName(unit)}
-				</a>
-				<StatusBadge status={unit.status} />
-			</div>
-			<div class="card-body">
-				<div class="price">
-					<strong>{formatMan(unit.rent)}</strong>
-					<span class="sub">管理費 {formatMan(unit.admin_fee)}</span>
-					<span class="sub">
-						敷 {formatMonths(unit.deposit, unit.rent)} / 礼{" "}
-						{formatMonths(unit.key_money, unit.rent)}
-					</span>
-				</div>
-				<div class="facts">
-					<span>{unit.area_m2}㎡</span>
-					<span>{formatAge(unit.built_age, unit.built_ym)}</span>
-					{first && (
-						<span>
-							{formatStation(first)}
-							{restStations.length > 0 && (
-								<span class="sub"> ほか{restStations.length}駅</span>
+		<div class="col">
+			<div class="card h-100 shadow-sm">
+				<div class="row g-0 h-100">
+					<div class="col-4 p-2">
+						<Thumbnail unit={unit} />
+					</div>
+					<div class="col-8">
+						<div class="card-body d-flex flex-column h-100 p-2 pe-3">
+							<div class="d-flex justify-content-between align-items-start gap-2">
+								<a
+									class="card-title h6 mb-1 text-body text-decoration-none unit-name"
+									href={unitPath(unit.unit_key)}
+								>
+									{unitName(unit)}
+								</a>
+								<StatusBadge status={unit.status} />
+							</div>
+							<div class="d-flex flex-wrap align-items-baseline column-gap-2">
+								<span class="fs-5 fw-bold">{formatMan(unit.rent)}</span>
+								<span class="small text-body-secondary">
+									管理費 {formatMan(unit.admin_fee)}
+								</span>
+							</div>
+							<div class="small text-body-secondary">
+								敷 {formatMonths(unit.deposit, unit.rent)} / 礼{" "}
+								{formatMonths(unit.key_money, unit.rent)}
+							</div>
+							<div class="small d-flex flex-wrap column-gap-2">
+								<span>{unit.area_m2}㎡</span>
+								<span>{formatAge(unit.built_age, unit.built_ym)}</span>
+								{first && (
+									<span>
+										{formatStation(first)}
+										{restStations.length > 0 && (
+											<span class="text-body-secondary">
+												{" "}
+												ほか{restStations.length}駅
+											</span>
+										)}
+									</span>
+								)}
+							</div>
+							<div class="mt-1">
+								<Flags flags={unit.flags} />
+							</div>
+							{unit.summary && (
+								<p class="small mt-1 mb-0 summary">{unit.summary}</p>
 							)}
-						</span>
-					)}
-					{unit.score !== null && <span>スコア {Math.round(unit.score)}</span>}
-					{unit.listing_count > 1 && (
-						<span class="sub">掲載 {unit.listing_count} 件</span>
-					)}
+							<div class="d-flex flex-wrap justify-content-between align-items-center mt-auto pt-2 gap-2">
+								<div class="small text-body-secondary text-nowrap">
+									{unit.score !== null && (
+										<span class="fw-semibold text-body me-2">
+											{Math.round(unit.score)}点
+										</span>
+									)}
+									{unit.listing_count > 1 && (
+										<span>掲載 {unit.listing_count} 件</span>
+									)}
+								</div>
+								<div class="ms-auto">
+									<JudgmentControl
+										unitKey={unit.unit_key}
+										judgment={unit.judgment}
+										access={access}
+									/>
+								</div>
+							</div>
+						</div>
+					</div>
 				</div>
-				<Flags flags={unit.flags} />
-				{unit.summary && <p class="summary">{unit.summary}</p>}
 			</div>
-			<JudgmentControl
-				unitKey={unit.unit_key}
-				judgment={unit.judgment}
-				access={access}
-			/>
-		</li>
+		</div>
 	);
 };
 
@@ -146,17 +236,27 @@ const Select: FC<{
 	value: string;
 	options: [string, string][];
 	label: string;
-}> = ({ name, value, options, label }) => (
-	<label class="field">
-		<span>{label}</span>
-		<select name={name}>
+	wide?: boolean;
+}> = ({ name, value, options, label, wide }) => (
+	<div class={`${wide ? "col-12" : "col-6"} col-sm-auto`}>
+		<label
+			class="form-label small text-body-secondary mb-0"
+			for={`filter-${name}`}
+		>
+			{label}
+		</label>
+		<select
+			class="form-select form-select-sm"
+			name={name}
+			id={`filter-${name}`}
+		>
 			{options.map(([v, text]) => (
 				<option value={v} selected={v === value}>
 					{text}
 				</option>
 			))}
 		</select>
-	</label>
+	</div>
 );
 
 export const UnitListPage: FC<{
@@ -169,7 +269,7 @@ export const UnitListPage: FC<{
 	return (
 		<Layout title="部屋一覧" access={access}>
 			<form
-				class="filters"
+				class="row g-2 align-items-end mb-3"
 				action="/"
 				method="get"
 				hx-trigger="change"
@@ -178,6 +278,7 @@ export const UnitListPage: FC<{
 				hx-push-url="true"
 			>
 				<Select
+					wide
 					name="status"
 					label="状態"
 					value={filter.status}
@@ -207,17 +308,23 @@ export const UnitListPage: FC<{
 					options={Object.entries(sortKeys) as [SortKey, string][]}
 				/>
 				<noscript>
-					<button type="submit">絞り込む</button>
+					<div class="col-auto">
+						<button class="btn btn-sm btn-primary" type="submit">
+							絞り込む
+						</button>
+					</div>
 				</noscript>
 			</form>
 			{units.length === 0 ? (
-				<p class="empty">該当する部屋はありません。</p>
+				<p class="text-center text-body-secondary py-5">
+					該当する部屋はありません。
+				</p>
 			) : (
-				<ul class="cards">
+				<div class="row row-cols-1 row-cols-lg-2 g-3">
 					{units.map((u) => (
 						<UnitCard unit={u} access={access} />
 					))}
-				</ul>
+				</div>
 			)}
 		</Layout>
 	);
@@ -243,6 +350,10 @@ const eventLabel = (e: EventRow): string => {
 		case "price_drop":
 		case "price_change":
 			return `家賃+管理費 ${formatMan(Number(d.from))} → ${formatMan(Number(d.to))}`;
+		case "evaluated":
+			return `評価: 基礎点 ${d.base}${d.adjust ? `、補正 ${Number(d.adjust) > 0 ? "+" : ""}${d.adjust}` : ""}${d.reason ? `（${d.reason}）` : ""}`;
+		case "auto_rejected":
+			return `必須条件外で見送り: ${((d.failures as string[] | undefined) ?? []).join("、")}`;
 		default:
 			return e.from_status || e.to_status
 				? `${e.from_status ?? ""} → ${e.to_status ?? ""}`
@@ -250,31 +361,92 @@ const eventLabel = (e: EventRow): string => {
 	}
 };
 
+// 説明付きの画像は詳細を取得した掲載にしかないので、説明の多い掲載を選ぶ
+const Gallery: FC<{ listings: ListingRow[] }> = ({ listings }) => {
+	const source = [...listings].sort(
+		(a, b) =>
+			b.images.filter((i) => i.caption).length -
+				a.images.filter((i) => i.caption).length ||
+			b.images.length - a.images.length,
+	)[0];
+	if (!source || source.images.length === 0) return null;
+	const images = source.images.map((image, index) => ({ ...image, index }));
+	// 比較で一番見る間取り図を先頭に出す
+	const ordered = [
+		...images.filter((i) => i.caption?.includes("間取り")),
+		...images.filter((i) => !i.caption?.includes("間取り")),
+	];
+	return (
+		<section class="mb-4">
+			<h2 class="h6 text-body-secondary">写真 ({images.length})</h2>
+			<div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-2">
+				{ordered.map((image) => (
+					<div class="col">
+						<figure class="figure w-100 mb-0">
+							<a
+								class="ratio ratio-4x3 d-block bg-body-secondary rounded overflow-hidden"
+								href={imagePath(source.listing_id, image.index)}
+								target="_blank"
+								rel="noreferrer"
+							>
+								<img
+									class="object-fit-cover"
+									src={imagePath(source.listing_id, image.index)}
+									alt={image.caption ?? "物件の写真"}
+									loading="lazy"
+									decoding="async"
+								/>
+							</a>
+							{image.caption && (
+								<figcaption
+									class="figure-caption text-truncate mt-1"
+									title={image.caption}
+								>
+									{image.caption}
+								</figcaption>
+							)}
+						</figure>
+					</div>
+				))}
+			</div>
+		</section>
+	);
+};
+
 export const MemoSaved: FC<{ at: string }> = ({ at }) => (
-	<span class="saved">{formatAt(at)} に保存しました</span>
+	<span class="small text-success">{formatAt(at)} に保存しました</span>
 );
 
 export const ApproveControl: FC<{ unit: UnitRow; access: Role }> = ({
 	unit,
 	access,
 }) => {
-	if (unit.apply_approved) return <p class="approved">申込を承認済み</p>;
+	if (unit.apply_approved)
+		return <div class="alert alert-success py-2 mb-0">申込を承認済み</div>;
 	if (access === "viewer" || unit.status !== "内見済") return null;
 	return (
 		<form
-			class="approve"
 			method="post"
 			action={`${unitPath(unit.unit_key)}/approve`}
 			hx-post={`${unitPath(unit.unit_key)}/approve`}
 			hx-swap="outerHTML"
 			hx-confirm="この部屋の申込を承認します。T3 の下書きが作られます。よろしいですか？"
 		>
-			<button type="submit" class="danger">
+			<button type="submit" class="btn btn-outline-danger">
 				申込を承認
 			</button>
 		</form>
 	);
 };
+
+const Row: FC<{ label: string; children: Child }> = ({ label, children }) => (
+	<>
+		<dt class="col-4 col-sm-3 fw-normal small text-body-secondary text-nowrap pt-1">
+			{label}
+		</dt>
+		<dd class="col-8 col-sm-9 mb-2">{children}</dd>
+	</>
+);
 
 export const UnitDetailPage: FC<{
 	unit: UnitRow;
@@ -286,121 +458,137 @@ export const UnitDetailPage: FC<{
 	const memoPath = `${unitPath(unit.unit_key)}/memo`;
 	return (
 		<Layout title={unitName(unit)} access={access}>
-			<p class="back">
-				<a href="/">← 一覧へ</a>
-			</p>
-			<div class="detail-head">
-				<h1>{unitName(unit)}</h1>
+			<nav aria-label="breadcrumb">
+				<ol class="breadcrumb small mb-2">
+					<li class="breadcrumb-item">
+						<a href="/">一覧</a>
+					</li>
+					<li class="breadcrumb-item active text-truncate" aria-current="page">
+						{unitName(unit)}
+					</li>
+				</ol>
+			</nav>
+			<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+				<h1 class="h4 mb-0 unit-name">{unitName(unit)}</h1>
 				<StatusBadge status={unit.status} />
-			</div>
-			<Flags flags={unit.flags} />
-			<JudgmentControl
-				unitKey={unit.unit_key}
-				judgment={unit.judgment}
-				access={access}
-			/>
-			<ApproveControl unit={unit} access={access} />
-			{unit.summary && <p class="summary">{unit.summary}</p>}
-
-			<section>
-				<h2>概要</h2>
-				<dl class="spec">
-					<dt>家賃</dt>
-					<dd>
-						{formatMan(unit.rent)}（管理費 {formatMan(unit.admin_fee)}）
-					</dd>
-					<dt>敷金 / 礼金</dt>
-					<dd>
-						{formatMonths(unit.deposit, unit.rent)} /{" "}
-						{formatMonths(unit.key_money, unit.rent)}
-					</dd>
-					<dt>間取り / 面積</dt>
-					<dd>
-						{unit.layout} / {unit.area_m2}㎡
-					</dd>
-					<dt>階</dt>
-					<dd>
-						{formatFloor(unit.floor)}
-						{detail?.building_floors && ` / ${detail.building_floors}`}
-					</dd>
-					<dt>築年</dt>
-					<dd>{formatAge(unit.built_age, unit.built_ym)}</dd>
-					<dt>向き</dt>
-					<dd>{unit.orientation ?? "不明"}</dd>
-					<dt>所在地</dt>
-					<dd>{unit.address}</dd>
-					<dt>最寄駅</dt>
-					<dd>
-						<ul class="plain">
-							{unit.stations.map((s) => (
-								<li>
-									{s.line} {formatStation(s)}
-								</li>
-							))}
-						</ul>
-					</dd>
-					{unit.viewing_at && (
-						<>
-							<dt>内見日時</dt>
-							<dd>{formatAt(unit.viewing_at)}</dd>
-						</>
-					)}
-					{unit.next_action && (
-						<>
-							<dt>次アクション</dt>
-							<dd>{unit.next_action}</dd>
-						</>
-					)}
-					{detail?.other_costs && (
-						<>
-							<dt>ほか初期費用</dt>
-							<dd>{detail.other_costs}</dd>
-						</>
-					)}
-					{detail?.guarantor && (
-						<>
-							<dt>保証会社</dt>
-							<dd>{detail.guarantor}</dd>
-						</>
-					)}
-				</dl>
-			</section>
-
-			<section>
-				<h2>評価メモ</h2>
-				{access === "owner" ? (
-					<form
-						class="memo"
-						method="post"
-						action={memoPath}
-						hx-post={memoPath}
-						hx-target="next .memo-status"
-					>
-						<textarea name="memo" rows={5}>
-							{unit.memo ?? ""}
-						</textarea>
-						<div class="row">
-							<button type="submit">保存</button>
-						</div>
-					</form>
-				) : (
-					<p class="memo-view">{unit.memo ?? "なし"}</p>
+				{unit.score !== null && (
+					<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">
+						{Math.round(unit.score)}点
+					</span>
 				)}
-				<div class="memo-status" />
-			</section>
+			</div>
+			<div class="mb-2">
+				<Flags flags={unit.flags} />
+			</div>
+			<div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+				<JudgmentControl
+					unitKey={unit.unit_key}
+					judgment={unit.judgment}
+					access={access}
+				/>
+				<ApproveControl unit={unit} access={access} />
+			</div>
+			{unit.summary && <p class="lead fs-6 summary">{unit.summary}</p>}
 
-			<section>
-				<h2>掲載 ({listings.length})</h2>
-				<ul class="listings">
+			<Gallery listings={listings} />
+
+			<div class="row g-3 mb-4">
+				<div class="col-lg-7">
+					<section class="card h-100">
+						<div class="card-header">概要</div>
+						<div class="card-body">
+							<dl class="row mb-0">
+								<Row label="家賃">
+									<span class="fw-bold">{formatMan(unit.rent)}</span>（管理費{" "}
+									{formatMan(unit.admin_fee)}）
+								</Row>
+								<Row label="敷金・礼金">
+									{formatMonths(unit.deposit, unit.rent)} /{" "}
+									{formatMonths(unit.key_money, unit.rent)}
+								</Row>
+								<Row label="間取り・面積">
+									{unit.layout} / {unit.area_m2}㎡
+								</Row>
+								<Row label="階">
+									{formatFloor(unit.floor)}
+									{detail?.building_floors && ` / ${detail.building_floors}`}
+								</Row>
+								<Row label="築年">
+									{formatAge(unit.built_age, unit.built_ym)}
+								</Row>
+								<Row label="向き">{unit.orientation ?? "不明"}</Row>
+								<Row label="所在地">{unit.address}</Row>
+								<Row label="最寄駅">
+									<ul class="list-unstyled mb-0">
+										{unit.stations.map((s) => (
+											<li>
+												{s.line} {formatStation(s)}
+											</li>
+										))}
+									</ul>
+								</Row>
+								{unit.viewing_at && (
+									<Row label="内見日時">{formatAt(unit.viewing_at)}</Row>
+								)}
+								{unit.next_action && (
+									<Row label="次アクション">{unit.next_action}</Row>
+								)}
+								{detail?.other_costs && (
+									<Row label="ほか初期費用">{detail.other_costs}</Row>
+								)}
+								{detail?.guarantor && (
+									<Row label="保証会社">{detail.guarantor}</Row>
+								)}
+							</dl>
+						</div>
+					</section>
+				</div>
+				<div class="col-lg-5">
+					<section class="card h-100">
+						<div class="card-header">評価メモ</div>
+						<div class="card-body">
+							{access === "owner" ? (
+								<form
+									method="post"
+									action={memoPath}
+									hx-post={memoPath}
+									hx-target="next .memo-status"
+								>
+									<textarea
+										class="form-control mb-2"
+										name="memo"
+										rows={6}
+										aria-label="評価メモ"
+									>
+										{unit.memo ?? ""}
+									</textarea>
+									<div class="d-flex justify-content-between align-items-center">
+										<div class="memo-status" />
+										<button class="btn btn-primary btn-sm" type="submit">
+											保存
+										</button>
+									</div>
+								</form>
+							) : (
+								<p class="mb-0 memo-view">{unit.memo ?? "なし"}</p>
+							)}
+						</div>
+					</section>
+				</div>
+			</div>
+
+			<section class="card mb-4">
+				<div class="card-header">掲載 ({listings.length})</div>
+				<ul class="list-group list-group-flush">
 					{listings.map((l) => (
-						<li>
+						<li class="list-group-item d-flex flex-wrap justify-content-between column-gap-3">
 							<a href={l.url} target="_blank" rel="noreferrer noopener">
 								{l.agent_name ?? "業者名未取得"}
 							</a>
 							<span>
 								{formatMan(l.rent)} + {formatMan(l.admin_fee)}
 							</span>
-							<span class="sub">
+							<span class="small text-body-secondary w-100">
 								{formatAt(l.first_seen)} 〜 {formatAt(l.last_seen)}
 								{l.missing_runs > 0 && `（一覧に無い: ${l.missing_runs} 回）`}
 							</span>
@@ -410,27 +598,33 @@ export const UnitDetailPage: FC<{
 			</section>
 
 			{detail && detail.features.length > 0 && (
-				<section>
-					<h2>設備</h2>
-					<ul class="chips">
+				<section class="mb-4">
+					<h2 class="h6 text-body-secondary">設備</h2>
+					<div class="d-flex flex-wrap gap-1">
 						{detail.features.map((f) => (
-							<li>{f}</li>
+							<span class="badge text-bg-light border fw-normal">{f}</span>
 						))}
-					</ul>
+					</div>
 				</section>
 			)}
 
-			<section>
-				<h2>履歴</h2>
-				<ol class="events">
+			<section class="card mb-4">
+				<div class="card-header">履歴</div>
+				<ul class="list-group list-group-flush small">
 					{events.map((e) => (
-						<li>
-							<time>{formatAt(e.at)}</time>
-							<span>{eventLabel(e)}</span>
-							{e.actor === "human" && <span class="sub">（人）</span>}
+						<li class="list-group-item d-flex gap-3">
+							<time class="text-body-secondary text-nowrap">
+								{formatAt(e.at)}
+							</time>
+							<span>
+								{eventLabel(e)}
+								{e.actor === "human" && (
+									<span class="text-body-secondary">（人）</span>
+								)}
+							</span>
 						</li>
 					))}
-				</ol>
+				</ul>
 			</section>
 		</Layout>
 	);
@@ -438,8 +632,8 @@ export const UnitDetailPage: FC<{
 
 export const NotFoundPage: FC<{ access: Role }> = ({ access }) => (
 	<Layout title="見つかりません" access={access}>
-		<p class="empty">部屋が見つかりません。</p>
-		<p>
+		<p class="text-center text-body-secondary py-5">部屋が見つかりません。</p>
+		<p class="text-center">
 			<a href="/">一覧へ戻る</a>
 		</p>
 	</Layout>

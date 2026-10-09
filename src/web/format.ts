@@ -29,7 +29,8 @@ export const unitName = (u: {
 	building_name: string;
 	floor: number | null;
 	layout: string;
-}): string => `${u.building_name} ${formatFloor(u.floor)} ${u.layout}`;
+}): string =>
+	`${u.building_name.normalize("NFKC")} ${formatFloor(u.floor)} ${u.layout}`;
 
 const jstFormat = new Intl.DateTimeFormat("ja-JP", {
 	timeZone: "Asia/Tokyo",
@@ -41,6 +42,9 @@ const jstFormat = new Intl.DateTimeFormat("ja-JP", {
 
 export const formatAt = (iso: string): string =>
 	jstFormat.format(new Date(iso));
+
+export const imagePath = (listingId: string, index: number): string =>
+	`/images/${encodeURIComponent(listingId)}/${index}`;
 
 export const unitPath = (key: string): string =>
 	`/units/${encodeURIComponent(key)}`;

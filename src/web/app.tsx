@@ -4,11 +4,13 @@ import { csrf } from "hono/csrf";
 import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
 import { judgments, unitStatuses } from "../domain.ts";
+import type { ImageStore } from "../fetch/images.ts";
 import type { Clock } from "../time.ts";
 import {
 	approveApplication,
 	countByStatus,
 	getEvents,
+	getImageUrl,
 	getListings,
 	getUnit,
 	listUnits,
@@ -29,6 +31,7 @@ import {
 export type WebOptions = {
 	db: Database;
 	clock: Clock;
+	images: ImageStore;
 	ownerLogins: string[];
 	allowedOrigins: string[];
 	// 開発時に tailscale serve を通さず操作するためのフラグ
@@ -47,6 +50,10 @@ const judgmentForm = z.object({
 const memoForm = z.object({ memo: z.string().max(10_000) });
 
 const staticFiles = {
+	"/static/bootstrap.min.css": {
+		url: import.meta.resolve("bootstrap/dist/css/bootstrap.min.css"),
+		type: "text/css",
+	},
 	"/static/htmx.min.js": {
 		url: import.meta.resolve("htmx.org/dist/htmx.min.js"),
 		type: "text/javascript",
@@ -87,10 +94,30 @@ export function createApp(options: WebOptions) {
 	for (const [path, file] of Object.entries(staticFiles)) {
 		app.get(path, (c) => {
 			c.header("content-type", file.type);
-			c.header("cache-control", "public, max-age=3600");
+			c.header("cache-control", "public, max-age=31536000, immutable");
 			return c.body(Bun.file(new URL(file.url)).stream());
 		});
 	}
+
+	app.get("/images/:listingId/:index{[0-9]+}", async (c) => {
+		const url = getImageUrl(
+			db,
+			c.req.param("listingId"),
+			Number(c.req.param("index")),
+		);
+		if (!url) return c.notFound();
+		let image: Awaited<ReturnType<ImageStore["get"]>>;
+		try {
+			image = await options.images.get(url);
+		} catch {
+			// 取得の上限や停止中は画像なしで画面を出す
+			image = null;
+		}
+		if (!image) return c.body(null, 404);
+		c.header("content-type", image.contentType);
+		c.header("cache-control", "private, max-age=604800, immutable");
+		return c.body(Bun.file(image.path).stream());
+	});
 
 	app.get("/", (c) => {
 		const filter = filterSchema.parse(c.req.query());
