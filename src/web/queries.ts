@@ -99,7 +99,7 @@ const orderBy: Record<SortKey, string> = {
 const unitSelect = `
 	WITH ranked AS (
 		SELECT l.*,
-			ROW_NUMBER() OVER (PARTITION BY unit_key ORDER BY rent + admin_fee, last_seen DESC) AS rn,
+			ROW_NUMBER() OVER (PARTITION BY unit_key ORDER BY rent + admin_fee, last_seen DESC, listing_id) AS rn,
 			COUNT(*) OVER (PARTITION BY unit_key) AS listing_count
 		FROM listings l
 	)
@@ -179,7 +179,7 @@ export function getListings(db: Database, key: string): ListingRow[] {
 		>(
 			`SELECT listing_id, url, agent_name, rent, admin_fee, deposit, key_money, first_seen, last_seen, missing_runs,
 				features, other_costs, guarantor, building_floors, property_type, images
-			FROM listings WHERE unit_key = ? ORDER BY rent + admin_fee, last_seen DESC`,
+			FROM listings WHERE unit_key = ? ORDER BY rent + admin_fee, last_seen DESC, listing_id`,
 		)
 		.all(key)
 		.map((l) => ({

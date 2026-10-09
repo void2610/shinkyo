@@ -2,8 +2,21 @@ import type { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { extname, join } from "node:path";
 import type { Clock } from "../time.ts";
-import { isImageUrl } from "./parse.ts";
+import { isImageUrl, type RoomImage } from "./parse.ts";
 import type { HttpClient } from "./suumo.ts";
+
+export const isFloorPlan = (image: RoomImage): boolean =>
+	image.caption?.includes("間取り") ?? false;
+
+// 説明付きの画像は詳細を取得した掲載にしかないので、説明の多い掲載を写真の出どころにする
+export function pickGallerySource<T extends { images: RoomImage[] }>(
+	listings: T[],
+): T | undefined {
+	const captioned = (l: T) => l.images.filter((i) => i.caption).length;
+	return [...listings].sort(
+		(a, b) => captioned(b) - captioned(a) || b.images.length - a.images.length,
+	)[0];
+}
 
 export type StoredImage = { path: string; contentType: string };
 

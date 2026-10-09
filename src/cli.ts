@@ -1,20 +1,22 @@
 #!/usr/bin/env bun
+import type { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { loadConfig } from "./config.ts";
+import { type Config, loadConfig } from "./config.ts";
 import { createImageStore } from "./fetch/images.ts";
 import { createRawStore, noopRawStore } from "./fetch/raw.ts";
 import { HttpClient, imageLimits, pageLimits } from "./fetch/suumo.ts";
 import { jevFromEnv } from "./jev.ts";
 import { runEvaluate } from "./jobs/evaluate.ts";
 import { runFetch } from "./jobs/fetch.ts";
+import { runPrefetch } from "./jobs/prefetch.ts";
 import { launchAgentPath, launchAgents, protectedLocation } from "./launchd.ts";
 import { spawnClaude } from "./llm.ts";
 import { JobLocked, withLock } from "./lock.ts";
 import { createNotifier } from "./notify.ts";
 import { openDb } from "./store/db.ts";
-import { sleep, systemClock } from "./time.ts";
+import { type HourRange, sleep, systemClock } from "./time.ts";
 import { createApp } from "./web/app.tsx";
 
 export type JobOptions = {
@@ -65,6 +67,27 @@ const evaluateJob: Job = async ({ dryRun, configDir, dbPath }) => {
 	);
 };
 
+const imageStore = (
+	config: Config,
+	db: Database,
+	dbPath: string,
+	options: { activeHours?: HourRange | null } = {},
+) =>
+	createImageStore({
+		db,
+		client: new HttpClient({
+			db,
+			limits: imageLimits(config.policy, options),
+			runId: crypto.randomUUID(),
+			clock: systemClock,
+			sleep,
+			random: Math.random,
+			fetchImpl: fetch,
+		}),
+		dir: join(dataDir(dbPath), "images"),
+		clock: systemClock,
+	});
+
 const fetchJob: Job = async (options) => {
 	const { dryRun, ignoreActiveHours, configDir, dbPath } = options;
 	const config = await loadConfig(configDir);
@@ -101,25 +124,22 @@ const fetchJob: Job = async (options) => {
 	);
 	// J2 は J1 の直後に走らせる (仕様 5章)
 	await evaluateJob(options);
+	if (dryRun) return;
+	// 画面を開いたときに待たないよう、候補のサムネイルと間取り図を先に取っておく
+	const prefetched = await runPrefetch({
+		db,
+		images: imageStore(config, db, dbPath, {
+			activeHours: ignoreActiveHours ? null : config.policy.fetch.active_hours,
+		}),
+		log: (m) => console.log(m),
+	});
+	console.log(`写真の先回り取得 ${prefetched.fetched} 枚`);
 };
 
 const serveJob: Job = async ({ port, devOwner, configDir, dbPath }) => {
 	const config = await loadConfig(configDir);
 	const db = openDb(dbPath);
-	const images = createImageStore({
-		db,
-		client: new HttpClient({
-			db,
-			limits: imageLimits(config.policy),
-			runId: `serve-${crypto.randomUUID()}`,
-			clock: systemClock,
-			sleep,
-			random: Math.random,
-			fetchImpl: fetch,
-		}),
-		dir: join(dataDir(dbPath), "images"),
-		clock: systemClock,
-	});
+	const images = imageStore(config, db, dbPath);
 	const app = createApp({
 		db,
 		clock: systemClock,
@@ -129,7 +149,13 @@ const serveJob: Job = async ({ port, devOwner, configDir, dbPath }) => {
 		devOwner,
 	});
 	// tailscale serve からだけ届くように、ループバックにしか bind しない
-	const server = Bun.serve({ hostname: "127.0.0.1", port, fetch: app.fetch });
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port,
+		// 写真の取得待ちで接続が切れないよう、既定 (10秒) より長く待つ
+		idleTimeout: 60,
+		fetch: app.fetch,
+	});
 	console.log(
 		`http://127.0.0.1:${server.port} で待ち受け中${devOwner ? " (dev-owner: 全員が操作できる)" : ""}`,
 	);
