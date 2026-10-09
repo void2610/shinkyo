@@ -16,6 +16,31 @@ export type EvalInput = {
 	texts: string[];
 };
 
+// 詳細ページを取る前でも、一覧の情報だけで間取り・家賃・面積・徒歩・階・築年は判定できる
+export function listInput(l: {
+	rent: number;
+	admin_fee: number;
+	area_m2: number;
+	layout: string;
+	floor: number | null;
+	built_age: number | null;
+	stations: string;
+}): EvalInput {
+	return {
+		rent: l.rent,
+		adminFee: l.admin_fee,
+		areaM2: l.area_m2,
+		layout: l.layout,
+		floor: l.floor,
+		builtYm: null,
+		builtAge: l.built_age,
+		stations: JSON.parse(l.stations),
+		features: [],
+		orientation: null,
+		texts: [],
+	};
+}
+
 export type ScoreParts = Record<
 	"commute" | "rent" | "area" | "age" | "features",
 	number

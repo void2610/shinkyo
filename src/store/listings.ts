@@ -263,12 +263,23 @@ export function markMissing(
 	return [...touched];
 }
 
-export function listingsWithoutDetail(
-	db: Database,
-): { listing_id: string; url: string }[] {
+export type PendingDetail = {
+	listing_id: string;
+	url: string;
+	rent: number;
+	admin_fee: number;
+	area_m2: number;
+	layout: string;
+	floor: number | null;
+	built_age: number | null;
+	stations: string;
+};
+
+export function listingsWithoutDetail(db: Database): PendingDetail[] {
 	return db
-		.query<{ listing_id: string; url: string }, []>(
-			"SELECT listing_id, url FROM listings WHERE detail_fetched_at IS NULL AND missing_runs = 0 ORDER BY first_seen",
+		.query<PendingDetail, []>(
+			`SELECT listing_id, url, rent, admin_fee, area_m2, layout, floor, built_age, stations FROM listings
+			WHERE detail_fetched_at IS NULL AND missing_runs = 0 ORDER BY first_seen`,
 		)
 		.all();
 }

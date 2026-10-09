@@ -21,7 +21,7 @@ const detailHtml = await fixture("detail.html");
 // 固定の fixture (家賃 12.5万円 + 8000円) が必須条件を満たすよう上限だけ広げる
 const criteria: Criteria = {
 	...config.criteria,
-	hard: { ...config.criteria.hard, rent_total_max: 150000 },
+	hard: { ...config.criteria.hard, rent_total_max: 150000, layouts: ["1LDK"] },
 };
 
 function seed(detailFor: string[], notes?: string): Database {
@@ -134,11 +134,14 @@ describe("J2 評価", () => {
 		});
 	});
 
-	test("詳細を取得していない部屋は評価を待つ", async () => {
+	test("詳細を取得していない部屋は、一覧だけで外れるものは見送り、残りは評価を待つ", async () => {
 		const db = seed([]);
-		const { run } = evaluate(db, claudeReplying([]).run);
-		expect(await run()).toEqual({ rejected: 0, candidates: [], llmFailed: 0 });
+		const claude = claudeReplying([]);
+		const summary = await evaluate(db, claude.run).run();
+		expect(summary).toEqual({ rejected: 1, candidates: [], llmFailed: 0 });
 		expect(unitOf(db, "900000000001")?.status).toBe("新着");
+		expect(unitOf(db, "900000000003")?.status).toBe("見送り");
+		expect(claude.calls).toEqual([]);
 	});
 
 	test("必須条件を外れた部屋は Claude に渡さず自動で見送り、理由を残す", async () => {

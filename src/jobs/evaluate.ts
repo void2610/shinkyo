@@ -7,6 +7,7 @@ import {
 	baseScore,
 	type EvalInput,
 	hardFailures,
+	listInput,
 	type ScoreParts,
 	scoreParts,
 } from "../evaluate/score.ts";
@@ -88,14 +89,16 @@ type ListingRow = {
 	detail_fetched_at: string | null;
 };
 
+// detailed が false の部屋は一覧の情報だけで判定し、外れなければ詳細を待つ
 type Target = {
 	key: string;
 	listing: ListingRow;
 	input: EvalInput;
 	stations: Station[];
+	detailed: boolean;
 };
 
-// 詳細を取得するまでは築年月や設備が分からないので評価を待つ
+// 築年月や設備は詳細にしか無いので、一覧だけで外れる部屋を先に見送り、残りは詳細を待って評価する
 function targets(db: Database): Target[] {
 	const rows = db
 		.query<ListingRow, []>(
@@ -104,10 +107,22 @@ function targets(db: Database): Target[] {
 		)
 		.all();
 	const byUnit = Map.groupBy(rows, (r) => r.unit_key);
-	return [...byUnit.entries()].flatMap(([key, listings]) => {
+	return [...byUnit.entries()].flatMap(([key, listings]): Target[] => {
 		const cheapest = listings[0];
+		if (!cheapest) return [];
 		const detailed = listings.find((l) => l.detail_fetched_at !== null);
-		if (!cheapest || !detailed) return [];
+		if (!detailed) {
+			const stations = JSON.parse(cheapest.stations) as Station[];
+			return [
+				{
+					key,
+					listing: cheapest,
+					stations,
+					input: listInput(cheapest),
+					detailed: false,
+				},
+			];
+		}
 		const stations = JSON.parse(cheapest.stations) as Station[];
 		const features = detailed.features
 			? (JSON.parse(detailed.features) as string[])
@@ -139,6 +154,7 @@ function targets(db: Database): Target[] {
 						...features,
 					].filter((t): t is string => !!t),
 				},
+				detailed: true,
 			},
 		];
 	});
@@ -278,6 +294,7 @@ export async function runEvaluate(
 
 	for (const target of targets(db)) {
 		const failures = hardFailures(target.input, criteria, now);
+		if (failures.length === 0 && !target.detailed) continue;
 		if (failures.length > 0) {
 			summary.rejected++;
 			if (dryRun) {

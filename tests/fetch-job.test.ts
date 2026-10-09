@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import type { Criteria } from "../src/config.ts";
 import { noopRawStore } from "../src/fetch/raw.ts";
 import { HttpClient, pageLimits } from "../src/fetch/suumo.ts";
 import { runFetch } from "../src/jobs/fetch.ts";
@@ -18,6 +19,18 @@ const SEARCH =
 	"https://suumo.jp/jj/chintai/ichiran/FR301FC001/?ar=030&sc=99999";
 const PAGE2 = `${SEARCH}&page=2`;
 const config = await repoConfig();
+// fixture の部屋 (1LDK・ワンルーム・1K、B1階など) をすべて詳細まで取るため、必須条件をゆるめる
+const anyRoom: Criteria = {
+	...config.criteria,
+	hard: {
+		...config.criteria.hard,
+		rent_total_max: 10_000_000,
+		area_min_m2: 0,
+		walk_max_min: 99,
+		floor_min: -9,
+		layouts: [],
+	},
+};
 const [p1, p2, detail, broken, empty] = await Promise.all(
 	[
 		"list_p1.html",
@@ -38,6 +51,7 @@ function setup(
 	routes: Record<string, Route | (() => Route)>,
 	db: Database = memoryDb(),
 	clock = new FakeClock(MONDAY_10_JST),
+	options: { criteria?: Criteria } = {},
 ) {
 	const notifications: Notification[] = [];
 	const fetch = fakeFetch({
@@ -59,6 +73,7 @@ function setup(
 			}),
 			searches: [{ id: "test", url: SEARCH }],
 			policy: config.policy,
+			criteria: options.criteria ?? anyRoom,
 			notify: async (n) => {
 				notifications.push(n);
 			},
@@ -234,5 +249,25 @@ describe("J1 取得", () => {
 		clock.advance(45 * 60_000);
 		await run();
 		expect(calls.length).toBe(before);
+	});
+
+	test("一覧の時点で必須条件を外れる掲載は、詳細を取らない", async () => {
+		const twoRooms = {
+			...anyRoom,
+			hard: { ...anyRoom.hard, layouts: ["2LDK"] },
+		};
+		const { run, calls } = setup(
+			{ [SEARCH]: { body: p1 ?? "" }, [PAGE2]: { body: p2 ?? "" } },
+			undefined,
+			undefined,
+			{ criteria: twoRooms },
+		);
+		const summary = await run();
+		expect(summary).toMatchObject({
+			newListings: 4,
+			details: 0,
+			skippedDetails: 4,
+		});
+		expect(calls.some((u) => u.includes("jnc_"))).toBe(false);
 	});
 });

@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import type { Policy, Search } from "../config.ts";
+import type { Criteria, Policy, Search } from "../config.ts";
+import { hardFailures, listInput } from "../evaluate/score.ts";
 import {
 	type ListedRoom,
 	parseDetailPage,
@@ -27,6 +28,7 @@ export type FetchJobDeps = {
 	clock: Clock;
 	dryRun: boolean;
 	log: (message: string) => void;
+	criteria: Criteria;
 };
 
 export type FetchSummary = {
@@ -36,6 +38,7 @@ export type FetchSummary = {
 	priceDrops: { unitKey: string; from: number; to: number }[];
 	missingUnits: string[];
 	details: number;
+	skippedDetails: number;
 	stopped: string | null;
 };
 
@@ -133,8 +136,14 @@ async function fetchDetails(
 	deps: FetchJobDeps,
 	summary: FetchSummary,
 ): Promise<void> {
-	const { db, client, raw, clock, log } = deps;
-	for (const { listing_id, url } of listingsWithoutDetail(db)) {
+	const { db, client, raw, clock, log, criteria } = deps;
+	for (const pending of listingsWithoutDetail(db)) {
+		const { listing_id, url } = pending;
+		// 一覧の時点で必須条件を外れる掲載は、詳細を取ってもどうせ見送るのでリクエストを使わない
+		if (hardFailures(listInput(pending), criteria, clock()).length > 0) {
+			summary.skippedDetails++;
+			continue;
+		}
 		const res = await client.get(url);
 		if (res.status !== 200) {
 			log(`詳細 ${listing_id} が HTTP ${res.status} だった`);
@@ -176,6 +185,7 @@ export async function runFetch(deps: FetchJobDeps): Promise<FetchSummary> {
 		priceDrops: [],
 		missingUnits: [],
 		details: 0,
+		skippedDetails: 0,
 		stopped: null,
 	};
 	if (shouldStop(db, policy)) {

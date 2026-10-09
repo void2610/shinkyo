@@ -112,6 +112,7 @@ const fetchJob: Job = async (options) => {
 			client,
 			searches: config.searches,
 			policy: config.policy,
+			criteria: config.criteria,
 			notify: createNotifier(config.profile, { dryRun }),
 			raw: dryRun ? noopRawStore : createRawStore(join(dataDir(dbPath), "raw")),
 			clock,
@@ -120,7 +121,7 @@ const fetchJob: Job = async (options) => {
 		}),
 	);
 	console.log(
-		`新規掲載 ${summary.newListings} 件 / 新しい部屋 ${summary.newUnits.length} 件 / 詳細 ${summary.details} 件 / 値下げ ${summary.priceDrops.length} 件 / 本日のリクエスト ${client.requestsToday()} 回`,
+		`新規掲載 ${summary.newListings} 件 / 新しい部屋 ${summary.newUnits.length} 件 / 詳細 ${summary.details} 件 (条件外で省略 ${summary.skippedDetails} 件) / 値下げ ${summary.priceDrops.length} 件 / 本日のリクエスト ${client.requestsToday()} 回`,
 	);
 	// J2 は J1 の直後に走らせる (仕様 5章)
 	await evaluateJob(options);
