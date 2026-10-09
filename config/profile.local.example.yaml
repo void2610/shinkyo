@@ -1,0 +1,9 @@
+# config/profile.local.yaml にコピーして使う（gitignore）
+name: ""
+signature: |
+  
+move_in: ""                 # 入居希望時期
+people: 1
+job_income: ""              # 職業・年収帯の書き方
+viewing_windows: []         # 内見できる曜日と時間帯
+call_window: ""             # 審査の電話に出られる時間帯

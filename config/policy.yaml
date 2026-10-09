@@ -1,0 +1,19 @@
+paused: false                       # true で取得と送信を全停止
+fetch:
+  active_hours: "08:00-22:00"
+  interval_min: 45
+  request_gap_sec: 10               # 1リクエストごとの最小間隔
+  jitter_sec: 3
+  max_pages_per_search: 3
+  daily_request_cap: 150
+  stop_on_status: [403, 429, 503]
+mail:
+  send_hours: "09:00-21:00"
+  send_slots: ["10:00", "15:00"]    # J3 のまとめ送信の時刻
+  no_followup_weekdays: [tue, wed]
+  followup_after_hours: 24
+  auto_send_categories: [inquiry_on_approval, phone_redirect_reply, viewing_propose, viewing_confirm, followup]
+  auto_send_to_roles: [hub]
+  auto_send_daily_cap: 10
+stop_inquiries_when_status: [申込, 審査中]
+stop_fetch_when_status: [確定]

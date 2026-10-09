@@ -1,0 +1,17 @@
+# 値は仕様書 10章で確定する
+hard:                       # 1つでも外れたら自動で見送り（コードで判定）
+  rent_total_max: 120000    # 家賃+管理費（円）
+  area_min_m2: 25
+  walk_max_min: 10
+  built_from: 1982-01       # 新耐震の目安
+  floor_min: 2
+  layouts: [1LDK, 2K, 2DK]
+  exclude: [定期借家]
+weights:                    # 基礎点の配分（合計100）
+  commute: 30
+  rent: 25
+  area: 15
+  age: 10
+  features: 20
+features: [バス・トイレ別, 独立洗面台, 室内洗濯機置場, 南向き, 宅配ボックス]
+notify_min_score: 60        # これ以上の部屋だけ通知する

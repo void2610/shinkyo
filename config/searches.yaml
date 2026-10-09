@@ -1,0 +1,4 @@
+# 条件を絞って1〜3ページに収まる SUUMO の検索一覧URL（仕様書 10章で確定）
+searches: []
+#  - id: example
+#    url: https://suumo.jp/jj/chintai/ichiran/FR301FC001/?...

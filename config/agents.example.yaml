@@ -1,0 +1,10 @@
+# config/agents.yaml にコピーして使う（agents.yaml は業者の連絡先を含むので gitignore）
+agents:
+  - id: example-hub
+    name: 〇〇不動産
+    contact: 担当者名
+    email: someone@example.com     # email か domain のどちらか
+    # domain: example.com
+    role: candidate                # hub / candidate / excluded
+    fee: 家賃の0.5か月
+    memo: ""
