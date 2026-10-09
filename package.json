@@ -14,6 +14,8 @@
 	},
 	"dependencies": {
 		"hono": "^4.13.13",
+		"htmx.org": "^2.0.11",
+		"node-html-parser": "^9.0.4",
 		"yaml": "^2.9.1",
 		"zod": "^4.6.5"
 	},
