@@ -210,4 +210,12 @@ describe("画面", () => {
 		expect(requested).toEqual([detail.images[1]?.url ?? ""]);
 		expect((await app.request("/images/900000000002/9")).status).toBe(404);
 	});
+
+	test("写真は別ページへ移らず、同じページのモーダルで拡大する", async () => {
+		const html = await (await app.request(unitPath())).text();
+		expect(html).toContain('data-bs-toggle="modal"');
+		expect(html).toContain("carousel slide");
+		expect(html).not.toContain('target="_blank" rel="noreferrer"><img');
+		expect(html).toContain('data-slide="0"');
+	});
 });

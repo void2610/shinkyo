@@ -18,3 +18,9 @@
 .memo-view {
 	white-space: pre-wrap;
 }
+
+.gallery-full {
+	max-width: 100%;
+	max-height: calc(100vh - 7rem);
+	object-fit: contain;
+}

@@ -54,6 +54,10 @@ const staticFiles = {
 		url: import.meta.resolve("bootstrap/dist/css/bootstrap.min.css"),
 		type: "text/css",
 	},
+	"/static/bootstrap.bundle.min.js": {
+		url: import.meta.resolve("bootstrap/dist/js/bootstrap.bundle.min.js"),
+		type: "text/javascript",
+	},
 	"/static/htmx.min.js": {
 		url: import.meta.resolve("htmx.org/dist/htmx.min.js"),
 		type: "text/javascript",

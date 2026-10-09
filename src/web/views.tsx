@@ -3,6 +3,7 @@ import { raw } from "hono/html";
 import type { Child, FC } from "hono/jsx";
 import htmxPackage from "htmx.org/package.json";
 import { type Judgment, judgments, unitStatuses } from "../domain.ts";
+import { isFloorPlan, pickGallerySource } from "../fetch/images.ts";
 import {
 	formatAge,
 	formatAt,
@@ -35,6 +36,22 @@ const themeScript = raw(
 	`<script>document.documentElement.dataset.bsTheme=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"</script>`,
 );
 
+// hx-boost でページが差し替わっても効くよう、document に1回だけ登録する
+const galleryScript = raw(`<script>
+document.addEventListener("show.bs.modal", (e) => {
+	const slide = Number(e.relatedTarget?.dataset.slide ?? 0);
+	const carousel = e.target.querySelector(".carousel");
+	if (carousel) bootstrap.Carousel.getOrCreateInstance(carousel, { interval: false }).to(slide);
+});
+const showCaption = (modal) => {
+	const caption = modal?.querySelector("#gallery-caption");
+	const active = modal?.querySelector(".carousel-item.active");
+	if (caption && active) caption.textContent = active.dataset.caption;
+};
+document.addEventListener("shown.bs.modal", (e) => showCaption(e.target));
+document.addEventListener("slid.bs.carousel", (e) => showCaption(e.target.closest(".modal")));
+</script>`);
+
 export const Layout: FC<{ title: string; access: Role; children: Child }> = ({
 	title,
 	access,
@@ -53,6 +70,11 @@ export const Layout: FC<{ title: string; access: Role; children: Child }> = ({
 			/>
 			<link rel="stylesheet" href={`/static/style.css?v=${cssVersion}`} />
 			<script src={`/static/htmx.min.js?v=${htmxPackage.version}`} defer />
+			<script
+				src={`/static/bootstrap.bundle.min.js?v=${bootstrapPackage.version}`}
+				defer
+			/>
+			{galleryScript}
 		</head>
 		<body hx-boost="true">
 			<nav class="navbar border-bottom bg-body-tertiary">
@@ -361,33 +383,32 @@ const eventLabel = (e: EventRow): string => {
 	}
 };
 
-// 説明付きの画像は詳細を取得した掲載にしかないので、説明の多い掲載を選ぶ
+const GALLERY_MODAL = "gallery-modal";
+const GALLERY_CAROUSEL = "gallery-carousel";
+
 const Gallery: FC<{ listings: ListingRow[] }> = ({ listings }) => {
-	const source = [...listings].sort(
-		(a, b) =>
-			b.images.filter((i) => i.caption).length -
-				a.images.filter((i) => i.caption).length ||
-			b.images.length - a.images.length,
-	)[0];
+	const source = pickGallerySource(listings);
 	if (!source || source.images.length === 0) return null;
 	const images = source.images.map((image, index) => ({ ...image, index }));
 	// 比較で一番見る間取り図を先頭に出す
 	const ordered = [
-		...images.filter((i) => i.caption?.includes("間取り")),
-		...images.filter((i) => !i.caption?.includes("間取り")),
+		...images.filter(isFloorPlan),
+		...images.filter((i) => !isFloorPlan(i)),
 	];
 	return (
 		<section class="mb-4">
 			<h2 class="h6 text-body-secondary">写真 ({images.length})</h2>
 			<div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-2">
-				{ordered.map((image) => (
+				{ordered.map((image, slide) => (
 					<div class="col">
 						<figure class="figure w-100 mb-0">
-							<a
-								class="ratio ratio-4x3 d-block bg-body-secondary rounded overflow-hidden"
-								href={imagePath(source.listing_id, image.index)}
-								target="_blank"
-								rel="noreferrer"
+							<button
+								type="button"
+								class="ratio ratio-4x3 d-block w-100 border-0 p-0 bg-body-secondary rounded overflow-hidden"
+								data-bs-toggle="modal"
+								data-bs-target={`#${GALLERY_MODAL}`}
+								data-slide={slide}
+								aria-label={`${image.caption ?? "写真"}を拡大`}
 							>
 								<img
 									class="object-fit-cover"
@@ -396,7 +417,7 @@ const Gallery: FC<{ listings: ListingRow[] }> = ({ listings }) => {
 									loading="lazy"
 									decoding="async"
 								/>
-							</a>
+							</button>
 							{image.caption && (
 								<figcaption
 									class="figure-caption text-truncate mt-1"
@@ -408,6 +429,71 @@ const Gallery: FC<{ listings: ListingRow[] }> = ({ listings }) => {
 						</figure>
 					</div>
 				))}
+			</div>
+			<div
+				class="modal fade"
+				role="dialog"
+				id={GALLERY_MODAL}
+				tabindex={-1}
+				aria-label="写真の拡大表示"
+				aria-hidden="true"
+			>
+				<div class="modal-dialog modal-xl modal-dialog-centered modal-fullscreen-md-down">
+					<div class="modal-content bg-black border-0">
+						<div class="modal-header border-0 py-2" data-bs-theme="dark">
+							<span class="modal-title text-white small" id="gallery-caption" />
+							<button
+								type="button"
+								class="btn-close"
+								data-bs-dismiss="modal"
+								aria-label="閉じる"
+							/>
+						</div>
+						<div class="modal-body p-0 d-flex align-items-center">
+							<div
+								id={GALLERY_CAROUSEL}
+								class="carousel slide w-100"
+								data-bs-keyboard="true"
+								data-bs-touch="true"
+							>
+								<div class="carousel-inner">
+									{ordered.map((image, slide) => (
+										<div
+											class={`carousel-item ${slide === 0 ? "active" : ""}`}
+											data-caption={image.caption ?? ""}
+										>
+											<img
+												class="d-block mx-auto gallery-full"
+												src={imagePath(source.listing_id, image.index)}
+												alt={image.caption ?? "物件の写真"}
+												loading="lazy"
+												decoding="async"
+											/>
+										</div>
+									))}
+								</div>
+								<button
+									class="carousel-control-prev"
+									type="button"
+									data-bs-target={`#${GALLERY_CAROUSEL}`}
+									data-bs-slide="prev"
+								>
+									<span class="carousel-control-prev-icon" aria-hidden="true" />
+									<span class="visually-hidden">前の写真</span>
+								</button>
+								<button
+									class="carousel-control-next"
+									type="button"
+									data-bs-target={`#${GALLERY_CAROUSEL}`}
+									data-bs-slide="next"
+								>
+									<span class="carousel-control-next-icon" aria-hidden="true" />
+									<span class="visually-hidden">次の写真</span>
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 		</section>
 	);
