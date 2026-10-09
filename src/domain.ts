@@ -15,7 +15,27 @@ export type UnitStatus = (typeof unitStatuses)[number];
 export const judgments = ["◎", "○", "×"] as const;
 export type Judgment = (typeof judgments)[number];
 
-export const unitFlags = ["掲載終了の可能性", "値下げ", "統合候補"] as const;
+// 評価で Claude が選べる注意点。自由記述にすると長文になり一覧で比べられない
+export const cautionFlags = [
+	"北向き",
+	"1階",
+	"線路・幹線道路沿いの可能性",
+	"定期借家",
+	"告知事項あり",
+	"旧耐震の可能性",
+	"日当たりが悪い可能性",
+	"騒音の可能性",
+	"初期費用が高い",
+	"保証会社の条件が重い",
+] as const;
+
+export const unitFlags = [
+	"掲載終了の可能性",
+	"値下げ",
+	"統合候補",
+	"相場より安い",
+	...cautionFlags,
+] as const;
 export type UnitFlag = (typeof unitFlags)[number];
 
 export type Station = { line: string; station: string; walkMin: number };
