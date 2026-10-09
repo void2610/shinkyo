@@ -9,3 +9,4 @@ config/agents.yaml
 credentials*.json
 token*.json
 .env*
+!.env.example
