@@ -46,6 +46,7 @@ beforeEach(() => {
 		},
 		identify: testIdentity,
 		people: { [A]: "あおい", [B]: "ひかる" },
+		workplaces: [],
 		allowedOrigins: ["https://heya.example.com"],
 		build,
 	});
@@ -216,6 +217,14 @@ describe("画面", () => {
 		const res = await get(unitPath());
 		expect(res.status).toBe(200);
 		expect(await text(res)).toContain("掲載 (2)");
+	});
+
+	test("地図の画面は一覧と同じ条件で部屋を並べる (通勤先が無ければ書き方を案内する)", async () => {
+		const html = await text(await get("/map?layout=1LDK"));
+		expect(html).toContain(
+			"通勤先は config/profile.local.yaml の workplaces に書く",
+		);
+		expect(html).toContain("通勤が短い順 (1)");
 	});
 
 	test("存在しない部屋は 404", async () => {

@@ -11,6 +11,7 @@ import {
 	type ServerBuild,
 } from "react-router";
 import { appContext } from "../../app/context.ts";
+import type { Workplace } from "../commute/workplace.ts";
 import type { ImageStore } from "../fetch/images.ts";
 import type { Clock } from "../time.ts";
 import type { Identify } from "./identity.ts";
@@ -22,6 +23,7 @@ export type WebOptions = {
 	images: ImageStore;
 	identify: Identify;
 	people: Record<string, string>;
+	workplaces: Workplace[];
 	allowedOrigins: string[];
 	build: ServerBuild;
 };
@@ -100,6 +102,7 @@ export function createServer(options: WebOptions) {
 			clock,
 			person: c.get("person"),
 			people: options.people,
+			workplaces: options.workplaces,
 		});
 		return handle(asPublicRequest(c.req.raw, options.allowedOrigins), context);
 	});

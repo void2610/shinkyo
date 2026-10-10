@@ -208,6 +208,7 @@ const serveJob: Job = async ({ port, configDir, dbPath, skipBuild }) => {
 		images,
 		identify,
 		people: config.profile.web.people,
+		workplaces: config.profile.workplaces,
 		allowedOrigins: config.profile.web.allowed_origins,
 		build: await loadBuild(),
 	});

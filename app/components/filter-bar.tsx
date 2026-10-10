@@ -42,6 +42,8 @@ type Props = {
 	filter: UnitFilter;
 	options: FilterOptions;
 	counts: Record<string, number>;
+	// 通勤先が設定されているときだけ、通勤時間で絞り込める
+	commute: boolean;
 };
 
 // 条件はすべて URL に持たせる。共有やブックマークでそのまま同じ一覧を開けるようにするため
@@ -141,7 +143,7 @@ const tagValue = (filter: UnitFilter, flag: UnitFlag): string =>
 			? `-${flag}`
 			: "";
 
-export function FilterBar({ filter, options, counts }: Props) {
+export function FilterBar({ filter, options, counts, commute }: Props) {
 	const set = useParamSetter();
 	const total = Object.values(counts).reduce((a, b) => a + b, 0);
 	const advanced =
@@ -171,7 +173,9 @@ export function FilterBar({ filter, options, counts }: Props) {
 	return (
 		<Card className="mb-6 py-4">
 			<CardContent className="grid gap-4">
-				<div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
+				<div
+					className={`grid grid-cols-2 gap-4 md:grid-cols-4 ${commute ? "xl:grid-cols-8" : "xl:grid-cols-7"}`}
+				>
 					<SelectField
 						id="filter-status"
 						label="状態"
@@ -204,7 +208,9 @@ export function FilterBar({ filter, options, counts }: Props) {
 						label="並び"
 						value={filter.sort}
 						onChange={setOne("sort")}
-						options={Object.entries(sortKeys) as [SortKey, string][]}
+						options={(Object.entries(sortKeys) as [SortKey, string][]).filter(
+							([k]) => commute || k !== "commute",
+						)}
 					/>
 					<NumberField
 						id="filter-max-rent"
@@ -238,6 +244,16 @@ export function FilterBar({ filter, options, counts }: Props) {
 						value={filter.maxAge}
 						onCommit={setOne("max_age")}
 					/>
+					{commute && (
+						<NumberField
+							id="filter-max-commute"
+							label="通勤 (いちばん長い人)"
+							unit="分以内"
+							step={5}
+							value={filter.maxCommute}
+							onCommit={setOne("max_commute")}
+						/>
+					)}
 				</div>
 				<Collapsible open={open} onOpenChange={setOpen}>
 					<div className="flex items-center gap-3 text-sm">

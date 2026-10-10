@@ -4,9 +4,11 @@ import {
 	Link,
 	Links,
 	Meta,
+	NavLink,
 	Outlet,
 	Scripts,
 	ScrollRestoration,
+	useMatches,
 	useRouteLoaderData,
 } from "react-router";
 import { displayName } from "../src/web/format.ts";
@@ -24,6 +26,12 @@ const themeScript = `if(matchMedia("(prefers-color-scheme: dark)").matches)docum
 
 export function Layout({ children }: { children: ReactNode }) {
 	const data = useRouteLoaderData<typeof loader>("root");
+	const wide = useMatches().some(
+		(m) => (m.handle as { wide?: boolean } | undefined)?.wide,
+	);
+	const width = wide ? "max-w-none" : "max-w-7xl";
+	const nav = ({ isActive }: { isActive: boolean }) =>
+		`text-sm ${isActive ? "font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`;
 	return (
 		<html lang="ja" suppressHydrationWarning>
 			<head>
@@ -37,14 +45,19 @@ export function Layout({ children }: { children: ReactNode }) {
 			</head>
 			<body className="min-h-screen bg-background text-foreground antialiased">
 				<header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
-					<div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-6">
+					<div className={`mx-auto flex h-14 ${width} items-center gap-4 px-6`}>
 						<Link
 							className="font-heading text-base font-semibold tracking-tight"
 							to="/"
 						>
 							shinkyo
 						</Link>
-						<span className="text-sm text-muted-foreground">賃貸探し</span>
+						<NavLink to="/" end className={nav}>
+							一覧
+						</NavLink>
+						<NavLink to="/map" className={nav}>
+							地図と通勤
+						</NavLink>
 						{data && (
 							<span className="ml-auto text-sm text-muted-foreground">
 								{data.name}
@@ -52,7 +65,7 @@ export function Layout({ children }: { children: ReactNode }) {
 						)}
 					</div>
 				</header>
-				<main className="mx-auto max-w-7xl px-6 py-6">{children}</main>
+				<main className={`mx-auto ${width} px-6 py-6`}>{children}</main>
 				<ScrollRestoration />
 				<Scripts />
 			</body>

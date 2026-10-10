@@ -46,6 +46,7 @@ import {
 	setMemo,
 	type UnitRow,
 } from "../../src/web/queries.ts";
+import { CommuteSummary, workplaceViews } from "../components/commute";
 import { JudgmentControl } from "../components/judgment-control";
 import {
 	FloorPlans,
@@ -64,8 +65,8 @@ export const meta: Route.MetaFunction = ({ loaderData }) => [
 ];
 
 export function loader({ params, context }: Route.LoaderArgs) {
-	const { db, person, people } = context.get(appContext);
-	const unit = getUnit(db, params.key);
+	const { db, person, people, workplaces } = context.get(appContext);
+	const unit = getUnit(db, params.key, workplaces);
 	if (!unit) throw data("部屋が見つかりません", { status: 404 });
 	return {
 		unit,
@@ -73,6 +74,7 @@ export function loader({ params, context }: Route.LoaderArgs) {
 		events: getEvents(db, params.key),
 		person,
 		people,
+		workplaces: workplaceViews(workplaces),
 	};
 }
 
@@ -258,7 +260,7 @@ function OthersNotes({
 }
 
 export default function UnitPage({ loaderData }: Route.ComponentProps) {
-	const { unit, listings, events, person, people } = loaderData;
+	const { unit, listings, events, person, people, workplaces } = loaderData;
 	const mine = unit.evaluations.find((e) => e.person === person);
 	const detail = listings.find((l) => l.features.length > 0) ?? listings[0];
 	const photos = photosOf(listings);
@@ -308,6 +310,19 @@ export default function UnitPage({ loaderData }: Route.ComponentProps) {
 						<span>{formatAge(unit.built_age, unit.built_ym)}</span>
 						<span>{formatFloor(unit.floor)}</span>
 						{unit.orientation && <span>{unit.orientation}向き</span>}
+					</div>
+					<div className="flex flex-wrap items-start gap-x-6 gap-y-2">
+						<CommuteSummary unit={unit} workplaces={workplaces} />
+						<Button
+							variant="outline"
+							size="sm"
+							nativeButton={false}
+							render={
+								<Link to={`/map?unit=${encodeURIComponent(unit.unit_key)}`} />
+							}
+						>
+							地図で見る
+						</Button>
 					</div>
 					<Flags flags={unit.flags} />
 					{unit.summary && (

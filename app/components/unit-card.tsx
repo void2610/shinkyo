@@ -11,6 +11,7 @@ import {
 	unitPath,
 } from "../../src/web/format.ts";
 import type { UnitRow } from "../../src/web/queries.ts";
+import { minutesTone } from "./commute";
 import {
 	JudgmentControl,
 	myEvaluation,
@@ -89,6 +90,16 @@ export function UnitCard({
 						</span>
 					)}
 				</div>
+				{unit.max_commute !== null && (
+					<span className="text-sm">
+						<span className="text-muted-foreground">通勤 最長</span>{" "}
+						<span
+							className={`rounded px-1.5 font-semibold tabular-nums ${minutesTone(unit.max_commute)}`}
+						>
+							{unit.max_commute}分
+						</span>
+					</span>
+				)}
 				<Flags flags={unit.flags} />
 				<OthersJudgments
 					evaluations={unit.evaluations}

@@ -18,23 +18,30 @@ import type { Route } from "./+types/home";
 export const meta: Route.MetaFunction = () => [{ title: "部屋一覧 | shinkyo" }];
 
 export function loader({ request, context }: Route.LoaderArgs) {
-	const { db, clock, person, people } = context.get(appContext);
+	const { db, clock, person, people, workplaces } = context.get(appContext);
 	const filter = parseFilter(new URL(request.url).searchParams);
 	return {
-		units: listUnits(db, filter, clock().getFullYear(), person),
+		units: listUnits(db, filter, clock().getFullYear(), person, workplaces),
 		filter,
 		options: filterOptions(db),
 		counts: Object.fromEntries(countByStatus(db)),
 		person,
 		people,
+		commute: workplaces.length > 0,
 	};
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-	const { units, filter, options, counts, person, people } = loaderData;
+	const { units, filter, options, counts, person, people, commute } =
+		loaderData;
 	return (
 		<>
-			<FilterBar filter={filter} options={options} counts={counts} />
+			<FilterBar
+				filter={filter}
+				options={options}
+				counts={counts}
+				commute={commute}
+			/>
 			<p className="mb-3 text-sm text-muted-foreground">{units.length} 件</p>
 			{units.length === 0 ? (
 				<Empty className="py-16">
