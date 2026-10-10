@@ -7,6 +7,7 @@ hard:                       # 1つでも外れたら自動で見送り（コー�
   floor_min: 2
   layouts: [1LDK, 2K, 2DK]
   exclude: [定期借家]
+  required_features: []     # 設備にこの名前を含むものが無ければ見送り (詳細ページを取ってから判定)
 weights:                    # 基礎点の配分（合計100）
   commute: 30
   rent: 25

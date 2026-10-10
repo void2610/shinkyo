@@ -96,14 +96,16 @@ type Target = {
 	input: EvalInput;
 	stations: Station[];
 	detailed: boolean;
+	status: "新着" | "候補";
 };
 
-// 築年月や設備は詳細にしか無いので、一覧だけで外れる部屋を先に見送り、残りは詳細を待って評価する
+// 築年月や設備は詳細にしか無いので、一覧だけで外れる部屋を先に見送り、残りは詳細を待って評価する。
+// 候補も対象にし、必須条件を変えたときに外れるようになった部屋を見送る (採点はし直さない)
 function targets(db: Database): Target[] {
 	const rows = db
-		.query<ListingRow, []>(
-			`SELECT l.* FROM listings l JOIN units u ON u.unit_key = l.unit_key
-			WHERE u.status = '新着' ORDER BY l.unit_key, l.rent + l.admin_fee`,
+		.query<ListingRow & { status: Target["status"] }, []>(
+			`SELECT l.*, u.status FROM listings l JOIN units u ON u.unit_key = l.unit_key
+			WHERE u.status IN ('新着', '候補') ORDER BY l.unit_key, l.rent + l.admin_fee`,
 		)
 		.all();
 	const byUnit = Map.groupBy(rows, (r) => r.unit_key);
@@ -120,6 +122,7 @@ function targets(db: Database): Target[] {
 					stations,
 					input: listInput(cheapest),
 					detailed: false,
+					status: cheapest.status,
 				},
 			];
 		}
@@ -155,6 +158,7 @@ function targets(db: Database): Target[] {
 					].filter((t): t is string => !!t),
 				},
 				detailed: true,
+				status: cheapest.status,
 			},
 		];
 	});
@@ -293,8 +297,9 @@ export async function runEvaluate(
 	}[] = [];
 
 	for (const target of targets(db)) {
-		const failures = hardFailures(target.input, criteria, now);
-		if (failures.length === 0 && !target.detailed) continue;
+		const failures = hardFailures(target.input, criteria, now, target.detailed);
+		if (failures.length === 0 && (!target.detailed || target.status === "候補"))
+			continue;
 		if (failures.length > 0) {
 			summary.rejected++;
 			if (dryRun) {
@@ -310,7 +315,7 @@ export async function runEvaluate(
 					type: "auto_rejected",
 					actor: "system",
 					at,
-					fromStatus: "新着",
+					fromStatus: target.status,
 					toStatus: "見送り",
 					detail: { failures },
 				});

@@ -60,6 +60,8 @@ export function hardFailures(
 	u: EvalInput,
 	criteria: Criteria,
 	now: Date,
+	// 設備は詳細ページにしか無いので、一覧だけの判定では必須の設備を見ない
+	detailed: boolean,
 ): string[] {
 	const h = criteria.hard;
 	const reasons: string[] = [];
@@ -85,6 +87,9 @@ export function hardFailures(
 	for (const word of h.exclude) {
 		if (u.texts.some((t) => t.includes(word))) reasons.push(word);
 	}
+	if (detailed)
+		for (const feature of h.required_features)
+			if (!hasFeature(u, feature)) reasons.push(`${feature}なし`);
 	return reasons;
 }
 

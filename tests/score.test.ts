@@ -27,7 +27,7 @@ const room: EvalInput = {
 
 describe("必須条件", () => {
 	test("すべて満たせば見送り理由は無い", () => {
-		expect(hardFailures(room, criteria, now)).toEqual([]);
+		expect(hardFailures(room, criteria, now, true)).toEqual([]);
 	});
 
 	test.each([
@@ -49,8 +49,26 @@ describe("必須条件", () => {
 		["間取り", { layout: "ワンルーム" }, "間取り"],
 		["除外語", { texts: ["定期借家 2年"] }, "定期借家"],
 	])("%s", (_label, diff, reason) => {
-		const failures = hardFailures({ ...room, ...diff }, criteria, now);
+		const failures = hardFailures({ ...room, ...diff }, criteria, now, true);
 		expect(failures.join()).toContain(reason);
+	});
+});
+
+describe("必須の設備", () => {
+	const required = {
+		...criteria,
+		hard: { ...criteria.hard, required_features: ["床暖房", "宅配"] },
+	};
+	test("詳細の設備に無ければ見送り、名前の一部が合う設備も当てる", () => {
+		const ok = { ...room, features: ["床暖房", "宅配ボックス"] };
+		expect(hardFailures(ok, required, now, true)).toEqual([]);
+		expect(hardFailures(room, required, now, true)).toEqual([
+			"床暖房なし",
+			"宅配なし",
+		]);
+	});
+	test("一覧だけの判定では設備が分からないので見ない", () => {
+		expect(hardFailures(room, required, now, false)).toEqual([]);
 	});
 });
 

@@ -49,6 +49,8 @@ export const criteriaSchema = z.object({
 		floor_min: z.number().int(),
 		layouts: z.array(z.string()),
 		exclude: z.array(z.string()),
+		// SUUMO の「部屋の特徴・設備」にこの名前を含むものが無ければ見送る (例: 宅配 は 宅配ボックス にも当たる)
+		required_features: z.array(z.string()).default([]),
 	}),
 	weights: z.record(z.string(), z.number().min(0)),
 	features: z.array(z.string()),

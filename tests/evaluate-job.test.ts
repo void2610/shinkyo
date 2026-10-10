@@ -161,6 +161,44 @@ describe("J2 評価", () => {
 		expect(unitOf(db, "900000000001")?.status).toBe("見送り");
 	});
 
+	test("必須の設備が詳細に無い部屋は見送り、名前の一部が合う設備も当てる", async () => {
+		const db = seed(["900000000002"]);
+		const required = (features: string[]): Criteria => ({
+			...criteria,
+			hard: { ...criteria.hard, required_features: features },
+		});
+		await evaluate(db, claudeReplying([]).run, {
+			criteria: required(["宅配", "床暖房"]),
+		}).run();
+		const unit = unitOf(db, "900000000001");
+		expect(unit?.status).toBe("見送り");
+		expect(unit?.next_action).toBe("必須条件外: 床暖房なし");
+	});
+
+	test("候補になったあとで必須条件を足すと次の評価で見送り、満たす候補は評価し直さない", async () => {
+		const db = seed(["900000000002"]);
+		const claude = claudeReplying([
+			{ id: "0", flags: [], summary: "要約", adjust: 0, reason: "" },
+		]);
+		await evaluate(db, claude.run).run();
+		expect(unitOf(db, "900000000001")?.status).toBe("候補");
+		await evaluate(db, claude.run).run();
+		expect(claude.calls).toHaveLength(1);
+		await evaluate(db, claude.run, {
+			criteria: {
+				...criteria,
+				hard: { ...criteria.hard, required_features: ["床暖房"] },
+			},
+		}).run();
+		expect(unitOf(db, "900000000001")?.status).toBe("見送り");
+		const event = db
+			.query<{ from_status: string }, []>(
+				"SELECT e.from_status FROM events e JOIN listings l ON l.unit_key = e.unit_key WHERE e.type = 'auto_rejected' AND l.listing_id = '900000000001'",
+			)
+			.get();
+		expect(event?.from_status).toBe("候補");
+	});
+
 	test("Claude が失敗しても基礎点で候補にし、人の判断が要ると通知する", async () => {
 		const db = seed(["900000000002"]);
 		const { run, notifications } = evaluate(db, async () => ({
