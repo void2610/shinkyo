@@ -47,7 +47,7 @@ Oct 9, 2026 · @Shuya Izumi
 | web | 部屋の一覧・詳細・比較、人ごとの判定とメモ、申込の承認 | React Router v8（framework mode）+ shadcn/ui。入口は Hono。Cloudflare Tunnel + Access で公開 |
 | mailer | 問い合わせの送信、受信の分類（Jev）と抽出、返信の下書き（Claude） | Gmail API + Jev + `claude -p` |
 | notifier | 新着ダイジェスト、要判断、異常の通知 | ntfy |
-| scheduler | 各ジョブの定期実行と web の常駐 | launchd |
+| scheduler | 各ジョブの定期実行、web の常駐、CI を通った main の取り込み (docs/SETUP.md) | launchd |
 | skills | 対話で使う補助（状況確認、比較、電話メモ、パーサー修理） | Claude Code スキル |
 
 ### 人が関わる場所
