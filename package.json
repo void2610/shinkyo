@@ -2,6 +2,10 @@
 	"name": "shinkyo",
 	"private": true,
 	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/void2610/shinkyo"
+	},
 	"bin": {
 		"shinkyo": "src/cli.ts"
 	},
