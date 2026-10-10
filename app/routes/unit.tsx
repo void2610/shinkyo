@@ -137,6 +137,8 @@ const eventLabel = (
 		case "price_drop":
 		case "price_change":
 			return `家賃+管理費 ${formatMan(Number(d.from))} → ${formatMan(Number(d.to))}`;
+		case "rescored":
+			return `評価し直し: 基礎点 ${d.base}${d.adjust ? `、補正 ${Number(d.adjust) > 0 ? "+" : ""}${d.adjust}` : ""}${d.reason ? `（${d.reason}）` : ""}`;
 		case "evaluated":
 			return `評価: 基礎点 ${d.base}${d.adjust ? `、補正 ${Number(d.adjust) > 0 ? "+" : ""}${d.adjust}` : ""}${d.reason ? `（${d.reason}）` : ""}`;
 		case "auto_rejected":

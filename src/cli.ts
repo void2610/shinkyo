@@ -37,6 +37,7 @@ export type JobOptions = {
 	ignoreActiveHours: boolean;
 	install: boolean;
 	skipBuild: boolean;
+	rescore: boolean;
 	configDir: string;
 	dbPath: string;
 	root: string;
@@ -52,7 +53,7 @@ const notImplemented =
 // DB と同じ場所に、ロック・生 HTML・画像を置く
 const dataDir = (dbPath: string): string => join(dbPath, "..");
 
-const evaluateJob: Job = async ({ dryRun, configDir, dbPath }) => {
+const evaluateJob: Job = async ({ dryRun, configDir, dbPath, rescore }) => {
 	const config = await loadConfig(configDir);
 	const db = openDb(dbPath);
 	const summary = await withLock(
@@ -74,10 +75,11 @@ const evaluateJob: Job = async ({ dryRun, configDir, dbPath }) => {
 				jev: jevFromEnv(),
 				webOrigin: config.profile.web.allowed_origins[0] ?? null,
 				workplaces: config.profile.workplaces,
+				rescore,
 			}),
 	);
 	console.log(
-		`候補 ${summary.candidates.length} 件 / 見送り ${summary.rejected} 件 / 補正できなかった ${summary.llmFailed} 件`,
+		`候補 ${summary.candidates.length} 件 / 評価し直し ${summary.rescored} 件 / 見送り ${summary.rejected} 件 / 補正できなかった ${summary.llmFailed} 件`,
 	);
 };
 
@@ -98,6 +100,7 @@ const commuteJob: Job = async ({ dryRun, configDir, dbPath }) => {
 			runCommute({
 				db: openDb(dbPath),
 				criteria: config.criteria,
+				stations: config.stations,
 				workplaces: config.profile.workplaces,
 				geocode: createGsiGeocoder(fetch),
 				route,
@@ -163,6 +166,7 @@ const fetchJob: Job = async (options) => {
 			searches: config.searches,
 			policy: config.policy,
 			criteria: config.criteria,
+			stations: config.stations,
 			notify: createNotifier(config.profile, { dryRun }),
 			raw: dryRun ? noopRawStore : createRawStore(join(dataDir(dbPath), "raw")),
 			clock,
@@ -398,7 +402,7 @@ export const jobs = {
 const isJobName = (name: string): name is keyof typeof jobs =>
 	Object.hasOwn(jobs, name);
 
-const usage = `使い方: shinkyo <${Object.keys(jobs).join("|")}> [--dry-run] [--ignore-active-hours] [--port 8787] [--install] [--skip-build] [--config config] [--db data/shinkyo.db] [--root ~/shinkyo]`;
+const usage = `使い方: shinkyo <${Object.keys(jobs).join("|")}> [--dry-run] [--ignore-active-hours] [--port 8787] [--install] [--skip-build] [--rescore] [--config config] [--db data/shinkyo.db] [--root ~/shinkyo]`;
 
 export async function main(argv: string[]): Promise<number> {
 	const { positionals, values } = parseArgs({
@@ -410,6 +414,7 @@ export async function main(argv: string[]): Promise<number> {
 			port: { type: "string", default: "8787" },
 			install: { type: "boolean", default: false },
 			"skip-build": { type: "boolean", default: false },
+			rescore: { type: "boolean", default: false },
 			root: { type: "string", default: join(homedir(), "shinkyo") },
 			config: { type: "string", default: "config" },
 			db: { type: "string", default: "data/shinkyo.db" },
@@ -427,6 +432,7 @@ export async function main(argv: string[]): Promise<number> {
 			port: Number(values.port),
 			install: values.install,
 			skipBuild: values["skip-build"],
+			rescore: values.rescore,
 			root: values.root,
 			configDir: values.config,
 			dbPath: values.db,

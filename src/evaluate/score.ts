@@ -50,6 +50,17 @@ export type ScoreParts = Record<
 
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));
 
+// value が best で 1、worst で 0 になるよう直線で按分する (best > worst でもよい)
+const between = (value: number, [best, worst]: [number, number]): number =>
+	best === worst
+		? value <= best
+			? 1
+			: 0
+		: clamp01((worst - value) / (worst - best));
+
+const renovated = (u: EvalInput): boolean =>
+	u.features.some((f) => f.includes("リノベ") || f.includes("リフォーム"));
+
 const totalRent = (u: EvalInput): number => u.rent + u.adminFee;
 
 // 築年月が無ければ築年数から年だけ推定する
@@ -62,8 +73,11 @@ export function hardFailures(
 	u: EvalInput,
 	criteria: Criteria,
 	now: Date,
-	// 設備は詳細ページにしか無いので、一覧だけの判定では必須の設備を見ない
-	detailed: boolean,
+	options: {
+		// 設備は詳細ページにしか無いので、一覧だけの判定では必須の設備を見ない
+		detailed: boolean;
+		stations: Record<string, number>;
+	},
 ): string[] {
 	const h = criteria.hard;
 	const reasons: string[] = [];
@@ -89,9 +103,15 @@ export function hardFailures(
 	for (const word of h.exclude) {
 		if (u.texts.some((t) => t.includes(word))) reasons.push(word);
 	}
-	if (detailed)
+	if (options.detailed)
 		for (const feature of h.required_features)
 			if (!hasFeature(u, feature)) reasons.push(`${feature}なし`);
+	if (h.commute_max_min !== undefined) {
+		// 経路の実測が無ければ駅ごとの目安で判定し、目安の無い駅は通勤圏の外とみなす
+		const minutes = commuteMinutes(u, options.stations);
+		if (minutes === null) reasons.push("通勤時間の目安が無い駅");
+		else if (minutes > h.commute_max_min) reasons.push(`通勤 ${minutes}分`);
+	}
 	return reasons;
 }
 
@@ -138,14 +158,23 @@ export function scoreParts(
 	now: Date,
 ): ScoreParts {
 	const h = criteria.hard;
+	const { scoring } = criteria;
 	const commute = commuteMinutes(u, stations);
 	const year = builtYear(u, now);
+	const builtAge = year === null ? null : now.getFullYear() - year;
+	const age =
+		builtAge !== null && scoring.renovated_as_age !== undefined && renovated(u)
+			? Math.min(builtAge, scoring.renovated_as_age)
+			: builtAge;
 	return {
 		// 通勤先までの時間が分からない駅は中立の 0.5 にする
-		commute: commute === null ? 0.5 : clamp01((60 - commute) / 40),
-		rent: clamp01((h.rent_total_max - totalRent(u)) / (h.rent_total_max * 0.3)),
+		commute: commute === null ? 0.5 : between(commute, scoring.commute_min),
+		rent: between(
+			totalRent(u),
+			scoring.rent_total ?? [h.rent_total_max * 0.7, h.rent_total_max],
+		),
 		area: clamp01((u.areaM2 - h.area_min_m2) / (h.area_min_m2 * 0.6)),
-		age: year === null ? 0.5 : clamp01(1 - (now.getFullYear() - year) / 40),
+		age: age === null ? 0.5 : clamp01(1 - age / 40),
 		features:
 			criteria.features.length === 0
 				? 0.5

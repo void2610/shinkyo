@@ -55,11 +55,14 @@ export type EvaluateDeps = {
 	jev: Jev | null;
 	webOrigin: string | null;
 	workplaces?: Workplace[];
+	// 候補も採点と Claude の補正をし直す (採点の基準を変えたとき)
+	rescore?: boolean;
 };
 
 export type EvaluateSummary = {
 	rejected: number;
 	candidates: string[];
+	rescored: number;
 	llmFailed: number;
 };
 
@@ -226,6 +229,12 @@ async function askJev(
 	}
 }
 
+// 何を重視するかは利用者の好みなので、リポジトリの指示文ではなく criteria の llm_guidance から足す
+const systemPromptOf = (deps: EvaluateDeps): string =>
+	deps.criteria.llm_guidance
+		? `${deps.systemPrompt}\n\n## 利用者が重視すること・気にしないこと\n\n${deps.criteria.llm_guidance.trim()}`
+		: deps.systemPrompt;
+
 async function askClaude(
 	deps: EvaluateDeps,
 	batch: { target: Target; base: number }[],
@@ -246,7 +255,7 @@ async function askClaude(
 		? (
 				await callClaude({
 					schema: llmResultSchema,
-					systemPrompt: deps.systemPrompt,
+					systemPrompt: systemPromptOf(deps),
 					instruction,
 					input,
 					runner: deps.claude,
@@ -255,7 +264,7 @@ async function askClaude(
 		: (
 				await callClaude({
 					schema: llmTextSchema,
-					systemPrompt: deps.systemPrompt,
+					systemPrompt: systemPromptOf(deps),
 					instruction,
 					input,
 					runner: deps.claude,
@@ -291,6 +300,7 @@ export async function runEvaluate(
 	const summary: EvaluateSummary = {
 		rejected: 0,
 		candidates: [],
+		rescored: 0,
 		llmFailed: 0,
 	};
 	const passed: {
@@ -301,8 +311,24 @@ export async function runEvaluate(
 	}[] = [];
 
 	for (const target of targets(db)) {
-		const failures = hardFailures(target.input, criteria, now, target.detailed);
-		if (failures.length === 0 && (!target.detailed || target.status === "候補"))
+		// 経路の実測があれば、通勤時間の判定にも採点にも使う
+		const commute = maxCommute(
+			db,
+			target.listing.address,
+			deps.workplaces ?? [],
+		);
+		const input =
+			commute === null
+				? target.input
+				: { ...target.input, routeCommute: commute };
+		const failures = hardFailures(input, criteria, now, {
+			detailed: target.detailed,
+			stations,
+		});
+		if (
+			failures.length === 0 &&
+			(!target.detailed || (target.status === "候補" && !deps.rescore))
+		)
 			continue;
 		if (failures.length > 0) {
 			summary.rejected++;
@@ -326,19 +352,7 @@ export async function runEvaluate(
 			})();
 			continue;
 		}
-		const commute = maxCommute(
-			db,
-			target.listing.address,
-			deps.workplaces ?? [],
-		);
-		const parts = scoreParts(
-			commute === null
-				? target.input
-				: { ...target.input, routeCommute: commute },
-			criteria,
-			stations,
-			now,
-		);
+		const parts = scoreParts(input, criteria, stations, now);
 		const median = target.stations[0]
 			? marketMedian(db, target.stations[0].station, target.input.layout)
 			: null;
@@ -390,12 +404,13 @@ export async function runEvaluate(
 				for (const flag of byJev ?? r?.flags ?? [])
 					setFlag(db, target.key, flag, true, at);
 				if (cheap) setFlag(db, target.key, "相場より安い", true, at);
+				const again = target.status === "候補";
 				recordEvent(db, {
 					unitKey: target.key,
-					type: "evaluated",
+					type: again ? "rescored" : "evaluated",
 					actor: "system",
 					at,
-					fromStatus: "新着",
+					fromStatus: target.status,
 					toStatus: "候補",
 					detail: {
 						base,
@@ -405,6 +420,10 @@ export async function runEvaluate(
 						flagsBy: byJev ? "jev" : r?.flags ? "claude" : null,
 					},
 				});
+				if (again) {
+					summary.rescored++;
+					continue;
+				}
 				summary.candidates.push(target.key);
 				scored.push({
 					target,

@@ -66,6 +66,7 @@ function evaluate(
 		clock?: FakeClock;
 		criteria?: Criteria;
 		jev?: Jev;
+		rescore?: boolean;
 	} = {},
 ) {
 	const notifications: Notification[] = [];
@@ -84,6 +85,7 @@ function evaluate(
 			claude,
 			jev: options.jev ?? null,
 			webOrigin: "https://m1.example.ts.net",
+			rescore: options.rescore ?? false,
 		});
 	return { run, notifications };
 }
@@ -138,7 +140,12 @@ describe("J2 評価", () => {
 		const db = seed([]);
 		const claude = claudeReplying([]);
 		const summary = await evaluate(db, claude.run).run();
-		expect(summary).toEqual({ rejected: 1, candidates: [], llmFailed: 0 });
+		expect(summary).toEqual({
+			rejected: 1,
+			candidates: [],
+			rescored: 0,
+			llmFailed: 0,
+		});
 		expect(unitOf(db, "900000000001")?.status).toBe("新着");
 		expect(unitOf(db, "900000000003")?.status).toBe("見送り");
 		expect(claude.calls).toEqual([]);
@@ -197,6 +204,37 @@ describe("J2 評価", () => {
 			)
 			.get();
 		expect(event?.from_status).toBe("候補");
+	});
+
+	test("--rescore では候補も採点と補正をし直し、利用者の重視することを Claude に渡す", async () => {
+		const db = seed(["900000000002"]);
+		const prompts: string[] = [];
+		const run: ClaudeRunner = async (args, stdin, cwd) => {
+			prompts.push(args[args.indexOf("--append-system-prompt") + 1] ?? "");
+			return claudeReplying([
+				{ id: "0", flags: [], summary: "要約", adjust: 2, reason: "綺麗" },
+			]).run(args, stdin, cwd);
+		};
+		await evaluate(db, run).run();
+		const guided: Criteria = { ...criteria, llm_guidance: "綺麗さを重視する" };
+		const again = await evaluate(db, run, {
+			criteria: guided,
+			rescore: true,
+		}).run();
+		expect(again).toMatchObject({ candidates: [], rescored: 1 });
+		expect(prompts[0]).not.toContain("綺麗さを重視する");
+		expect(prompts[1]).toContain("綺麗さを重視する");
+		expect(unitOf(db, "900000000001")).toMatchObject({
+			status: "候補",
+			adj_score: 2,
+		});
+		const types = db
+			.query<{ type: string }, []>(
+				"SELECT type FROM events WHERE type IN ('evaluated', 'rescored') ORDER BY id",
+			)
+			.all()
+			.map((e) => e.type);
+		expect(types).toEqual(["evaluated", "rescored"]);
 	});
 
 	test("Claude が失敗しても基礎点で候補にし、人の判断が要ると通知する", async () => {

@@ -29,6 +29,7 @@ export type FetchJobDeps = {
 	dryRun: boolean;
 	log: (message: string) => void;
 	criteria: Criteria;
+	stations?: Record<string, number>;
 };
 
 export type FetchSummary = {
@@ -140,7 +141,12 @@ async function fetchDetails(
 	for (const pending of listingsWithoutDetail(db)) {
 		const { listing_id, url } = pending;
 		// 一覧の時点で必須条件を外れる掲載は、詳細を取ってもどうせ見送るのでリクエストを使わない
-		if (hardFailures(listInput(pending), criteria, clock(), false).length > 0) {
+		if (
+			hardFailures(listInput(pending), criteria, clock(), {
+				detailed: false,
+				stations: deps.stations ?? {},
+			}).length > 0
+		) {
 			summary.skippedDetails++;
 			continue;
 		}

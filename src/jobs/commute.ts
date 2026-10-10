@@ -19,6 +19,7 @@ export type CommuteLimits = {
 export type CommuteDeps = {
 	db: Database;
 	criteria: Criteria;
+	stations?: Record<string, number>;
 	workplaces: Workplace[];
 	geocode: Geocoder;
 	route: RouteFinder | null;
@@ -48,6 +49,7 @@ export function commuteTargets(
 	db: Database,
 	criteria: Criteria,
 	now: Date,
+	stations: Record<string, number> = {},
 ): string[] {
 	const rows = db
 		.query<Row, []>(
@@ -64,7 +66,10 @@ export function commuteTargets(
 		.filter(
 			(r) =>
 				r.status !== "新着" ||
-				hardFailures(listInput(r), criteria, now, false).length === 0,
+				hardFailures(listInput(r), criteria, now, {
+					detailed: false,
+					stations,
+				}).length === 0,
 		)
 		.map((r) => r.address);
 	return [...new Set(addresses)];
@@ -100,7 +105,12 @@ type Geo = { address: string; lat: number | null; lon: number | null };
 export async function runCommute(deps: CommuteDeps): Promise<CommuteSummary> {
 	const { db, clock, log } = deps;
 	const summary: CommuteSummary = { geocoded: 0, routed: 0 };
-	const addresses = commuteTargets(db, deps.criteria, clock());
+	const addresses = commuteTargets(
+		db,
+		deps.criteria,
+		clock(),
+		deps.stations ?? {},
+	);
 	const known = new Map(
 		db
 			.query<Geo, []>("SELECT address, lat, lon FROM geocodes")

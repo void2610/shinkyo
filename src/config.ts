@@ -56,8 +56,22 @@ export const criteriaSchema = z.object({
 		exclude: z.array(z.string()),
 		// SUUMO の「部屋の特徴・設備」にこの名前を含むものが無ければ見送る (例: 宅配 は 宅配ボックス にも当たる)
 		required_features: z.array(z.string()).default([]),
+		// 通勤時間 (経路の実測、無ければ stations の目安 + 駅徒歩) の上限。指定すると目安の無い駅も見送る
+		commute_max_min: z.number().int().positive().optional(),
 	}),
 	weights: z.record(z.string(), z.number().min(0)),
+	// 基礎点の換算。[満点になる値, 0点になる値] の間を直線で按分する
+	scoring: z
+		.object({
+			commute_min: z.tuple([z.number(), z.number()]).default([20, 60]),
+			// 省略すると [上限の7割, 上限]
+			rent_total: z.tuple([z.number(), z.number()]).optional(),
+			// 設備にリノベーション・リフォームがある部屋は、築この年数として扱う
+			renovated_as_age: z.number().int().min(0).optional(),
+		})
+		.default({ commute_min: [20, 60] }),
+	// Claude の要約と補正で重視すること・気にしないこと (利用者の好みなので *.local.yaml に書く)
+	llm_guidance: z.string().optional(),
 	features: z.array(z.string()),
 	notify_min_score: z.number().min(0).max(100),
 });
