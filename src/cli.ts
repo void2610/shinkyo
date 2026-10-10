@@ -5,12 +5,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import pkg from "../package.json";
+import { createGsiGeocoder } from "./commute/gsi.ts";
+import { navitimeFromEnv } from "./commute/navitime.ts";
 import { type Config, loadConfig } from "./config.ts";
 import { ciStateOf, deployPaths, runDeploy } from "./deploy.ts";
 import { createImageStore } from "./fetch/images.ts";
 import { createRawStore, noopRawStore } from "./fetch/raw.ts";
 import { HttpClient, imageLimits, pageLimits } from "./fetch/suumo.ts";
 import { jevFromEnv } from "./jev.ts";
+import { runCommute } from "./jobs/commute.ts";
 import { runEvaluate } from "./jobs/evaluate.ts";
 import { runFetch } from "./jobs/fetch.ts";
 import { runPrefetch } from "./jobs/prefetch.ts";
@@ -70,10 +73,47 @@ const evaluateJob: Job = async ({ dryRun, configDir, dbPath }) => {
 				claude: spawnClaude,
 				jev: jevFromEnv(),
 				webOrigin: config.profile.web.allowed_origins[0] ?? null,
+				workplaces: config.profile.workplaces,
 			}),
 	);
 	console.log(
 		`候補 ${summary.candidates.length} 件 / 見送り ${summary.rejected} 件 / 補正できなかった ${summary.llmFailed} 件`,
+	);
+};
+
+const commuteJob: Job = async ({ dryRun, configDir, dbPath }) => {
+	const config = await loadConfig(configDir);
+	if (dryRun) {
+		console.log("[dry-run] 座標と通勤時間の取得は行わない");
+		return;
+	}
+	const route = navitimeFromEnv();
+	if (!route)
+		console.log("RAPIDAPI_KEY が無いので、通勤時間は調べず座標だけ取る");
+	const { commute } = config.policy;
+	const summary = await withLock(
+		join(dataDir(dbPath), "locks"),
+		"commute",
+		() =>
+			runCommute({
+				db: openDb(dbPath),
+				criteria: config.criteria,
+				workplaces: config.profile.workplaces,
+				geocode: createGsiGeocoder(fetch),
+				route,
+				limits: {
+					geocodeDailyCap: commute.geocode_daily_cap,
+					routeDailyCap: commute.route_daily_cap,
+					gapMs: commute.request_gap_sec * 1000,
+				},
+				clock: systemClock,
+				sleep,
+				log: (m) => console.log(m),
+				runId: crypto.randomUUID(),
+			}),
+	);
+	console.log(
+		`座標 ${summary.geocoded} 件 / 通勤時間 ${summary.routed} 件を新たに調べた`,
 	);
 };
 
@@ -133,7 +173,8 @@ const fetchJob: Job = async (options) => {
 	console.log(
 		`新規掲載 ${summary.newListings} 件 / 新しい部屋 ${summary.newUnits.length} 件 / 詳細 ${summary.details} 件 (条件外で省略 ${summary.skippedDetails} 件) / 値下げ ${summary.priceDrops.length} 件 / 本日のリクエスト ${client.requestsToday()} 回`,
 	);
-	// J2 は J1 の直後に走らせる (仕様 5章)
+	// 採点に通勤時間を使うので、評価 (J2) の前に調べる。J2 は J1 の直後に走らせる (仕様 5章)
+	await commuteJob(options);
 	await evaluateJob(options);
 	if (dryRun) return;
 	// 画面を開いたときに待たないよう、候補のサムネイルと間取り図を先に取っておく
@@ -343,6 +384,7 @@ const launchdJob: Job = async ({ install, port, root }) => {
 export const jobs = {
 	fetch: fetchJob,
 	evaluate: evaluateJob,
+	commute: commuteJob,
 	inquire: notImplemented("inquire"),
 	inbox: notImplemented("inbox"),
 	plan: notImplemented("plan"),

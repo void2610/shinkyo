@@ -26,6 +26,11 @@ export const policySchema = z.object({
 		jitter_sec: z.number().min(0),
 		daily_cap: z.number().int().positive(),
 	}),
+	commute: z.object({
+		request_gap_sec: z.number().min(0),
+		geocode_daily_cap: z.number().int().min(0),
+		route_daily_cap: z.number().int().min(0),
+	}),
 	mail: z.object({
 		send_hours: hourRange,
 		send_slots: z.array(hhmm),
@@ -84,6 +89,17 @@ export const profileSchema = z.object({
 	call_window: z.string().optional(),
 	ntfy_server: z.url().default("https://ntfy.sh"),
 	ntfy_topic: z.string().optional(),
+	// 通勤時間を調べる行き先。複数あれば、いちばん長くかかる人の時間で採点・絞り込みをする
+	workplaces: z
+		.array(
+			z.object({
+				name: z.string().min(1),
+				lat: z.number().min(-90).max(90),
+				lon: z.number().min(-180).max(180),
+				arrive_by: hhmm.default("09:00"),
+			}),
+		)
+		.default([]),
 	web: z
 		.object({
 			// Cloudflare Tunnel で公開する URL の origin (例: https://heya.example.com)

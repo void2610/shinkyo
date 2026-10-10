@@ -11,6 +11,10 @@ images:                             # 物件写真。候補のサムネイルと
   request_gap_sec: 0.2              # ブラウザで SUUMO を見るときの同時読み込みより控えめ
   jitter_sec: 0.1
   daily_cap: 5000
+commute:                            # 地図と通勤時間。住所 → 座標は国土地理院、経路は NAVITIME (RapidAPI)。結果は住所ごとに保存して調べ直さない
+  request_gap_sec: 1
+  geocode_daily_cap: 300
+  route_daily_cap: 15               # RapidAPI の BASIC は月 500 回。15 回 × 30 日で収める
 mail:
   send_hours: "09:00-21:00"
   send_slots: ["10:00", "15:00"]    # J3 のまとめ送信の時刻

@@ -8,6 +8,11 @@ job_income: ""              # 職業・年収帯の書き方
 viewing_windows: []         # 内見できる曜日と時間帯
 call_window: ""             # 審査の電話に出られる時間帯
 ntfy_topic: ""              # 通知先の ntfy トピック（空なら標準出力に出す）
+workplaces: []              # 通勤先。地図で右クリックした座標などを書く
+#  - name: 職場A
+#    lat: 35.68124
+#    lon: 139.76712
+#    arrive_by: "09:00"      # この時刻に着く経路で調べる (既定 09:00)
 web:
   allowed_origins: []       # Cloudflare Tunnel で公開する URL（例: https://heya.example.com）
   # access:                 # Cloudflare Access。未設定なら全員を local として扱う (開発用)

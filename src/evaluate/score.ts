@@ -14,6 +14,8 @@ export type EvalInput = {
 	features: string[];
 	orientation: string | null;
 	texts: string[];
+	// 経路検索で分かった、いちばん長い人の通勤時間 (分)。あれば stations.yaml より優先する
+	routeCommute?: number;
 };
 
 // 詳細ページを取る前でも、一覧の情報だけで間取り・家賃・面積・徒歩・階・築年は判定できる
@@ -118,6 +120,7 @@ export function commuteMinutes(
 	u: EvalInput,
 	stations: Record<string, number>,
 ): number | null {
+	if (u.routeCommute !== undefined) return u.routeCommute;
 	const totals = u.stations
 		.map((s) =>
 			stations[s.station] === undefined

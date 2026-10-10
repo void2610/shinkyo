@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { type Workplace, workplaceKey } from "../commute/workplace.ts";
 import type { Judgment, Station, UnitFlag, UnitStatus } from "../domain.ts";
 import type { RoomImage } from "../fetch/parse.ts";
 import { recordEvent } from "../store/listings.ts";
@@ -8,6 +9,7 @@ export const sortKeys = {
 	rent: "家賃が安い順",
 	score: "スコア順",
 	walk: "駅が近い順",
+	commute: "通勤が短い順",
 } as const;
 export type SortKey = keyof typeof sortKeys;
 
@@ -33,6 +35,8 @@ export type UnitFilter = {
 	minArea: number | null;
 	maxWalk: number | null;
 	maxAge: number | null;
+	// いちばん長い人の通勤時間 (分)。全員分が分かっている部屋だけが残る
+	maxCommute: number | null;
 	layouts: string[];
 	station: string | null;
 	withFlags: UnitFlag[];
@@ -49,6 +53,7 @@ export const emptyFilter: UnitFilter = {
 	minArea: null,
 	maxWalk: null,
 	maxAge: null,
+	maxCommute: null,
 	layouts: [],
 	station: null,
 	withFlags: [],
@@ -85,6 +90,19 @@ export type UnitRow = {
 	first_seen: string;
 	listing_count: number;
 	images: RoomImage[];
+	// 住所の町丁目の代表点。調べていない・見つからなければ null
+	lat: number | null;
+	lon: number | null;
+	commutes: Commute[];
+	max_commute: number | null;
+};
+
+export type Commute = {
+	workplace: string;
+	minutes: number | null;
+	transfers: number | null;
+	walk_min: number | null;
+	lines: string[];
 };
 
 // 判定とメモは人ごとに持つ。person は Cloudflare Access のメールアドレス (開発時は local)
@@ -126,8 +144,14 @@ export type EventRow = {
 
 type RawUnitRow = Omit<
 	UnitRow,
-	"flags" | "stations" | "apply_approved" | "images" | "evaluations"
+	| "flags"
+	| "stations"
+	| "apply_approved"
+	| "images"
+	| "evaluations"
+	| "commutes"
 > & {
+	commutes: string;
 	evaluations: string;
 	images: string;
 	flags: string;
@@ -140,10 +164,20 @@ const orderBy: Record<SortKey, string> = {
 	rent: "r.rent + r.admin_fee ASC",
 	score: "score IS NULL, score DESC",
 	walk: "min_walk IS NULL, min_walk ASC",
+	commute: "max_commute IS NULL, max_commute ASC",
 };
 
+// 職場のキーは設定から作る数字と記号だけなので、SQL に埋め込める
+const KEY_FORMAT = /^-?\d+\.\d+,-?\d+\.\d+@\d{2}:\d{2}$/;
+function maxCommuteSql(workplaces: Workplace[]): string {
+	const keys = workplaces.map(workplaceKey);
+	if (keys.length === 0 || keys.some((k) => !KEY_FORMAT.test(k))) return "NULL";
+	return `(SELECT CASE WHEN COUNT(c.minutes) = ${keys.length} THEN MAX(c.minutes) END
+		FROM commutes c WHERE c.address = r.address AND c.workplace IN (${keys.map((k) => `'${k}'`).join(", ")}))`;
+}
+
 // 部屋ごとに、家賃+管理費が最も安い掲載を代表として出す
-const unitSelect = `
+const unitSelect = (workplaces: Workplace[]) => `
 	WITH ranked AS (
 		SELECT l.*,
 			ROW_NUMBER() OVER (PARTITION BY unit_key ORDER BY rent + admin_fee, last_seen DESC, listing_id) AS rn,
@@ -156,8 +190,13 @@ const unitSelect = `
 		u.apply_approved, u.viewing_at, u.next_action, u.updated_at,
 		r.listing_id, r.url, r.rent, r.admin_fee, r.deposit, r.key_money, r.layout, r.area_m2, r.built_age, r.built_ym,
 		r.floor, r.building_name, r.address, r.stations, r.orientation, r.first_seen, r.listing_count, r.images,
-		(SELECT MIN(json_extract(value, '$.walkMin')) FROM json_each(r.stations)) AS min_walk
-	FROM units u JOIN ranked r ON r.unit_key = u.unit_key AND r.rn = 1`;
+		(SELECT MIN(json_extract(value, '$.walkMin')) FROM json_each(r.stations)) AS min_walk,
+		g.lat, g.lon,
+		(SELECT json_group_array(json_object('workplace', c.workplace, 'minutes', c.minutes, 'transfers', c.transfers,
+			'walk_min', c.walk_min, 'lines', json(c.lines))) FROM commutes c WHERE c.address = r.address) AS commutes,
+		${maxCommuteSql(workplaces)} AS max_commute
+	FROM units u JOIN ranked r ON r.unit_key = u.unit_key AND r.rn = 1
+	LEFT JOIN geocodes g ON g.address = r.address`;
 
 const toUnit = (raw: RawUnitRow & { min_walk?: number | null }): UnitRow => {
 	const {
@@ -166,11 +205,13 @@ const toUnit = (raw: RawUnitRow & { min_walk?: number | null }): UnitRow => {
 		apply_approved,
 		images,
 		evaluations,
+		commutes,
 		min_walk: _minWalk,
 		...rest
 	} = raw;
 	return {
 		...rest,
+		commutes: JSON.parse(commutes),
 		evaluations: JSON.parse(evaluations),
 		flags: JSON.parse(flags),
 		images: JSON.parse(images),
@@ -191,6 +232,7 @@ export function listUnits(
 	filter: UnitFilter,
 	year: number,
 	person: string,
+	workplaces: Workplace[] = [],
 	limit = 300,
 ): UnitRow[] {
 	const where: string[] = [];
@@ -225,6 +267,10 @@ export function listUnits(
 		bind("year", year);
 		where.push(`${ageSql} <= ${bind("maxAge", filter.maxAge)}`);
 	}
+	if (filter.maxCommute !== null)
+		where.push(
+			`${maxCommuteSql(workplaces)} <= ${bind("maxCommute", filter.maxCommute)}`,
+		);
 	if (filter.layouts.length > 0) {
 		where.push(
 			`r.layout IN (${filter.layouts.map((l, i) => bind(`layout${i}`, l)).join(", ")})`,
@@ -251,7 +297,7 @@ export function listUnits(
 			`EXISTS (SELECT 1 FROM listings fl, json_each(fl.features) f WHERE fl.unit_key = u.unit_key AND f.value = ${bind(`feature${i}`, feature)})`,
 		);
 	});
-	const sql = `${unitSelect} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${orderBy[filter.sort]} LIMIT ${limit}`;
+	const sql = `${unitSelect(workplaces)} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${orderBy[filter.sort]} LIMIT ${limit}`;
 	return db
 		.query<RawUnitRow, [Record<string, string | number>]>(sql)
 		.all(params)
@@ -295,9 +341,15 @@ export function countByStatus(db: Database): Map<string, number> {
 	return new Map(rows.map((r) => [r.status, r.n]));
 }
 
-export function getUnit(db: Database, key: string): UnitRow | null {
+export function getUnit(
+	db: Database,
+	key: string,
+	workplaces: Workplace[] = [],
+): UnitRow | null {
 	const row = db
-		.query<RawUnitRow, [string]>(`${unitSelect} WHERE u.unit_key = ?`)
+		.query<RawUnitRow, [string]>(
+			`${unitSelect(workplaces)} WHERE u.unit_key = ?`,
+		)
 		.get(key);
 	return row ? toUnit(row) : null;
 }

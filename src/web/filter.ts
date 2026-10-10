@@ -24,6 +24,7 @@ export function parseFilter(query: URLSearchParams): UnitFilter {
 		minArea: positive.parse(one("min_area")),
 		maxWalk: positive.parse(one("max_walk")),
 		maxAge: positive.parse(one("max_age")),
+		maxCommute: positive.parse(one("max_commute")),
 		layouts: query.getAll("layout").filter(Boolean),
 		station: one("station"),
 		withFlags: tags

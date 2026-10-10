@@ -135,6 +135,25 @@ const migrations: string[] = [
 	INSERT INTO evaluations (unit_key, person, judgment, memo, updated_at)
 		SELECT unit_key, 'local', judgment, memo, updated_at FROM units WHERE judgment IS NOT NULL OR memo IS NOT NULL;
 	`,
+	// 座標と通勤時間は住所ごとに持つ。見つからなかった結果も NULL で残し、同じ住所を調べ直さない
+	`
+	CREATE TABLE geocodes (
+		address TEXT PRIMARY KEY,
+		lat REAL,
+		lon REAL,
+		fetched_at TEXT NOT NULL
+	);
+	CREATE TABLE commutes (
+		address TEXT NOT NULL,
+		workplace TEXT NOT NULL,
+		minutes INTEGER,
+		transfers INTEGER,
+		walk_min INTEGER,
+		lines TEXT NOT NULL DEFAULT '[]',
+		fetched_at TEXT NOT NULL,
+		PRIMARY KEY (address, workplace)
+	);
+	`,
 ];
 
 export function migrate(db: Database): void {

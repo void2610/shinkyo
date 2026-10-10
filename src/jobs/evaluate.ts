@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
+import type { Workplace } from "../commute/workplace.ts";
 import type { Criteria } from "../config.ts";
 import { cautionFlags, type Station } from "../domain.ts";
 import { FLAG_THRESHOLD, flagQuestions } from "../evaluate/flags.ts";
@@ -17,6 +18,7 @@ import type { Notifier } from "../notify.ts";
 import { getState, setState } from "../store/db.ts";
 import { recordEvent, setFlag } from "../store/listings.ts";
 import { type Clock, jst } from "../time.ts";
+import { maxCommute } from "./commute.ts";
 
 const llmResultSchema = z.object({
 	results: z.array(
@@ -52,6 +54,7 @@ export type EvaluateDeps = {
 	claude: ClaudeRunner | null;
 	jev: Jev | null;
 	webOrigin: string | null;
+	workplaces?: Workplace[];
 };
 
 export type EvaluateSummary = {
@@ -68,6 +71,7 @@ const CHEAP_MIN_SAMPLES = 5;
 
 type ListingRow = {
 	listing_id: string;
+	address: string;
 	unit_key: string;
 	url: string;
 	building_name: string;
@@ -322,7 +326,19 @@ export async function runEvaluate(
 			})();
 			continue;
 		}
-		const parts = scoreParts(target.input, criteria, stations, now);
+		const commute = maxCommute(
+			db,
+			target.listing.address,
+			deps.workplaces ?? [],
+		);
+		const parts = scoreParts(
+			commute === null
+				? target.input
+				: { ...target.input, routeCommute: commute },
+			criteria,
+			stations,
+			now,
+		);
 		const median = target.stations[0]
 			? marketMedian(db, target.stations[0].station, target.input.layout)
 			: null;
