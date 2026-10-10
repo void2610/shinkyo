@@ -1,5 +1,6 @@
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readlinkSync,
@@ -64,11 +65,10 @@ export function linkShared(from: string, to: string): void {
 	for (const name of readdirSync(from)) {
 		const source = join(from, name);
 		const target = join(to, name);
-		if (
-			statSync(source).isDirectory() &&
-			existsSync(target) &&
-			statSync(target).isDirectory()
-		) {
+		const existing = lstatSync(target, { throwIfNoEntry: false });
+		// 貼ってある symlink をたどって中を貼り直すと、shared の実体を自分自身へのリンクで消してしまう
+		if (existing?.isSymbolicLink() && readlinkSync(target) === source) continue;
+		if (statSync(source).isDirectory() && existing?.isDirectory()) {
 			linkShared(source, target);
 			continue;
 		}
@@ -103,7 +103,11 @@ export async function runDeploy(deps: DeployDeps): Promise<DeployResult> {
 	ensureLayout(root);
 	const sha = await deps.latest();
 	const from = currentRelease(root);
-	if (sha === from) return { kind: "up_to_date", sha };
+	if (sha === from) {
+		// 版が変わらなくても、あとから shared/ に置いた設定はすぐ効かせる
+		linkShared(deployPaths(root).shared, join(root, "current"));
+		return { kind: "up_to_date", sha };
+	}
 	if (existsSync(failedMarker(root, sha))) return { kind: "skipped", sha };
 	// CI の失敗は再実行で直ることがあるので印を付けず、次の確認でまた見る
 	const ci = await deps.ciState(sha);

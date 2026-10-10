@@ -102,6 +102,23 @@ describe("デプロイ", () => {
 		expect(calls).toEqual([]);
 	});
 
+	test("今の版と同じでも、あとから shared/ に置いたものは貼り、貼ってある DB は壊さない", async () => {
+		mkdirSync(join(root, "shared", "data"), { recursive: true });
+		writeFileSync(join(root, "shared", "data", "shinkyo.db"), "db");
+		await runDeploy(deps().d);
+		writeFileSync(join(root, "shared", "config", "criteria.local.yaml"), "x");
+		writeFileSync(join(root, "shared", ".env"), "K=v");
+		expect((await runDeploy(deps().d)).kind).toBe("up_to_date");
+		const current = join(root, "current");
+		expect(
+			readFileSync(join(current, "config", "criteria.local.yaml"), "utf8"),
+		).toBe("x");
+		expect(readFileSync(join(current, ".env"), "utf8")).toBe("K=v");
+		expect(
+			readFileSync(join(root, "shared", "data", "shinkyo.db"), "utf8"),
+		).toBe("db");
+	});
+
 	test("CI が終わっていなければ待ち、失敗していれば入れない (再実行で通れば次に入る)", async () => {
 		expect((await runDeploy(deps({ ci: "pending" }).d)).kind).toBe(
 			"waiting_ci",
