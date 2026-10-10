@@ -1,5 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	mkdtempSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.ts";
@@ -13,7 +19,9 @@ const copyOfRepoConfig = () => {
 	const dir = mkdtempSync(join(tmpdir(), "shinkyo-config-"));
 	dirs.push(dir);
 	cpSync(join(import.meta.dir, "..", "config"), dir, { recursive: true });
-	rmSync(join(dir, "criteria.local.yaml"), { force: true });
+	// 手元の個人の条件に左右されないよう、*.local.yaml はすべて除く
+	for (const name of readdirSync(dir))
+		if (name.endsWith(".local.yaml")) rmSync(join(dir, name));
 	return dir;
 };
 
