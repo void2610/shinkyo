@@ -99,7 +99,13 @@ nix develop -c bun run shinkyo launchd --install  # ~/Library/LaunchAgents に�
 
    ```sh
    cloudflared service install
+   P=~/Library/LaunchAgents/com.cloudflare.cloudflared.plist
+   plutil -insert ProgramArguments.1 -string tunnel "$P"
+   plutil -insert ProgramArguments.2 -string run "$P"
+   launchctl bootout gui/$(id -u) "$P"; launchctl bootstrap gui/$(id -u) "$P"
    ```
+
+   sudo なしの `service install` が作る plist は引数が `cloudflared` だけで、`tunnel run` が無いので起動してもすぐ終わる。`cloudflared tunnel info shinkyo` に接続が出れば動いている
 
 4. Cloudflare の Zero Trust ダッシュボードで、Access のアプリを作る
    - Applications → Add → Self-hosted。ホスト名に `heya.example.com`
